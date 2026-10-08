@@ -86,17 +86,58 @@ function storeSupabase(sb, user){
   };
 }
 
-let sb = null;
+let sb = null, recupero = false;
+const QUI = () => location.origin + location.pathname;
 async function collega(){
   if (!configurato) return storeLocale();
+  // arrivando dal link "password dimenticata" si e' dentro, ma va scelta la password nuova
+  recupero = /type=recovery/.test(location.hash);
   sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
+  sb.auth.onAuthStateChange(ev => { if (ev === "PASSWORD_RECOVERY") recupero = true; });
   const {data} = await sb.auth.getSession();
   const user = data && data.session && data.session.user;
   return user ? storeSupabase(sb, user) : null;        // null: configurato ma non collegato
 }
-async function accedi(email){
-  const {error} = await sb.auth.signInWithOtp({email, options: {emailRedirectTo: location.origin + location.pathname}});
-  if (error) throw error;
+
+// ---------- accesso: email e password, oppure link via email ----------
+// I messaggi di Supabase sono in inglese: quelli che capitano davvero diventano frasi chiare.
+function traduci(error){
+  const m = (error && error.message) || String(error);
+  if (/invalid login credentials/i.test(m)) return "Email o password sbagliate.";
+  if (/email not confirmed/i.test(m)) return "Devi prima confermare l'email: apri il link che ti è arrivato per posta, poi entra.";
+  if (/already registered|already been registered/i.test(m)) return "Esiste già un account con questa email: premi «Entra», oppure «Password dimenticata?» se non ne hai mai scelta una.";
+  if (/at least (\d+) characters/i.test(m)) return `La password deve avere almeno ${m.match(/at least (\d+)/i)[1]} caratteri.`;
+  if (/rate limit|too many/i.test(m)) return "Troppe richieste in poco tempo: riprova fra qualche minuto.";
+  if (/same.*password|different from the old/i.test(m)) return "La password nuova deve essere diversa da quella di prima.";
+  if (/weak|pwned|compromised/i.test(m)) return "Password troppo debole: scegline una più lunga o meno comune.";
+  return m;
 }
-window.Store = {collega, accedi, configurato, storeLocale};
+const fallisce = error => { const e = new Error(traduci(error)); e.originale = error; throw e; };
+async function accedi(email){                                      // link via email
+  const {error} = await sb.auth.signInWithOtp({email, options: {emailRedirectTo: QUI()}});
+  if (error) fallisce(error);
+}
+async function entra(email, password){
+  const {error} = await sb.auth.signInWithPassword({email, password});
+  if (error) fallisce(error);
+}
+// torna "dentro" se l'account e' attivo subito, "conferma" se serve aprire la mail, "esiste" se l'email ha gia' un account
+async function creaAccount(email, password){
+  const {data, error} = await sb.auth.signUp({email, password, options: {emailRedirectTo: QUI()}});
+  if (error) fallisce(error);
+  if (data && data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) return "esiste";
+  return data && data.session ? "dentro" : "conferma";
+}
+async function passwordDimenticata(email){
+  const {error} = await sb.auth.resetPasswordForEmail(email, {redirectTo: QUI()});
+  if (error) fallisce(error);
+}
+async function cambiaPassword(password){
+  const {error} = await sb.auth.updateUser({password});
+  if (error) fallisce(error);
+  recupero = false;
+  if (/type=recovery/.test(location.hash)) history.replaceState(null, "", QUI());
+}
+window.Store = {collega, accedi, entra, creaAccount, passwordDimenticata, cambiaPassword, configurato, storeLocale,
+  get recupero(){ return recupero; }};
 })();

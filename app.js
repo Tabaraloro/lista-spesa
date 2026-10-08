@@ -30,6 +30,7 @@ async function collegaDb(){
   try {
     db = await Store.collega();
     if (!db) { mostraAccesso(); return; }
+    if (Store.recupero) setTimeout(() => apriPassword(true), 300);
     collegaWishlist();
     collegaCercate();
     collegaCarrello();
@@ -687,25 +688,79 @@ async function caricaCarte(voci){
   if (primo && db && db.ricarica) db.ricarica();       // ora si possono riconoscere le cercate uscite dalla wishlist
 }
 
-// ---------- accesso con email (solo con Supabase configurato) ----------
+// ---------- accesso: email e password, oppure link via email (solo con Supabase configurato) ----------
 function mostraAccesso(){
-  statoCarico = `<div class="accesso">
+  statoCarico = `<form class="accesso" id="acc-form" autocomplete="on">
     <h2>Accedi</h2>
-    <p>Scrivi la tua email: ti arriva un link, aprilo su questo dispositivo e sei dentro. Wishlist, carte cercate, carrello e trovate restano legati a questa email e li vedi uguali dal telefono e dal PC.</p>
-    <input id="acc-email" type="email" autocomplete="email" inputmode="email" placeholder="la tua email">
-    <button class="btn" id="acc-invia">Mandami il link</button>
-    <div class="sub" id="acc-msg"></div></div>`;
+    <p>Wishlist, carte cercate, carrello e trovate restano legati al tuo account e li vedi uguali dal telefono e dal PC.</p>
+    <input id="acc-email" name="email" type="email" autocomplete="username" inputmode="email" placeholder="Email" required>
+    <input id="acc-pw" name="password" type="password" autocomplete="current-password" placeholder="Password" minlength="6">
+    <button class="btn" type="submit">Entra</button>
+    <div class="acc-altro">
+      <button class="btn sec piccolo" type="button" data-acc="crea">Crea account</button>
+      <button class="btn sec piccolo" type="button" data-acc="dimenticata">Password dimenticata?</button>
+      <button class="btn sec piccolo" type="button" data-acc="link">Entra con un link via email</button>
+    </div>
+    <div class="sub" id="acc-msg" role="status"></div></form>`;
   render();
 }
-document.getElementById("lista").addEventListener("click", async e => {
-  if (!e.target.closest("#acc-invia")) return;
+async function azioneAccesso(cosa){
   const email = document.getElementById("acc-email").value.trim();
+  const pw = document.getElementById("acc-pw").value;
   const msg = document.getElementById("acc-msg");
   if (!email) { msg.textContent = "Scrivi prima l'email."; return; }
-  msg.textContent = "Invio…";
-  try { await Store.accedi(email); msg.textContent = `Fatto: apri il link che ti è arrivato a ${email}. Se non lo vedi, guarda nello spam.`; }
-  catch(err){ msg.textContent = "Non è andata: " + (err && err.message || err); }
+  if ((cosa === "entra" || cosa === "crea") && pw.length < 6) { msg.textContent = "Scrivi la password: almeno 6 caratteri."; return; }
+  msg.textContent = "Un momento…";
+  try {
+    if (cosa === "entra") { await Store.entra(email, pw); msg.textContent = "Dentro!"; location.reload(); return; }
+    if (cosa === "crea") {
+      const r = await Store.creaAccount(email, pw);
+      if (r === "dentro") { location.reload(); return; }
+      msg.textContent = r === "esiste"
+        ? "Esiste già un account con questa email. Se non hai mai scelto una password (entravi col link), premi «Password dimenticata?» per sceglierla."
+        : `Ti ho mandato una mail a ${email}: apri il link per confermare l'account, poi torna qui ed entra con email e password.`;
+      return;
+    }
+    if (cosa === "dimenticata") { await Store.passwordDimenticata(email); msg.textContent = `Ti ho mandato una mail a ${email}: apri il link e potrai scegliere la password nuova. Se non la vedi, guarda nello spam.`; return; }
+    if (cosa === "link") { await Store.accedi(email); msg.textContent = `Fatto: apri il link che ti è arrivato a ${email}. Se non lo vedi, guarda nello spam.`; return; }
+  } catch(err){ msg.textContent = (err && err.message) || String(err); }
+}
+document.getElementById("lista").addEventListener("submit", e => {
+  if (e.target.id !== "acc-form") return;
+  e.preventDefault(); azioneAccesso("entra");
 });
+document.getElementById("lista").addEventListener("click", e => {
+  const b = e.target.closest("[data-acc]"); if (b) azioneAccesso(b.dataset.acc);
+});
+
+// ---------- scegliere o cambiare la password ----------
+// Si apre dal Menu, e da solo quando si arriva dal link "password dimenticata".
+function apriPassword(recupero){
+  const wrap = document.getElementById("foglio-wrap");
+  wrap.innerHTML = `<div class="velo" ${recupero ? "" : "data-chiudi"}></div>
+    <form class="foglio" role="dialog" aria-label="Password" id="pw-form">
+      <h2>${recupero ? "Scegli la password nuova" : "Password"}</h2>
+      <div class="sub">${recupero ? "Sei entrato col link della mail. Scegli la password con cui entrerai d'ora in poi." : "Scegli la password con cui entrare, insieme alla tua email. Se finora entravi col link, da adesso puoi usare anche questa."}</div>
+      <input type="email" autocomplete="username" value="${esc(db && db.utente || "")}" hidden readonly>
+      <div class="campi" style="grid-template-columns:1fr">
+        <input id="pw-1" type="password" autocomplete="new-password" placeholder="Password nuova (almeno 6 caratteri)" minlength="6" required>
+        <input id="pw-2" type="password" autocomplete="new-password" placeholder="Ripeti la password" minlength="6" required>
+      </div>
+      <div class="scelte"><button class="btn" type="submit">Salva la password</button>${recupero ? "" : `<button class="btn sec" type="button" data-chiudi>Annulla</button>`}</div>
+      <div class="sub" id="pw-msg" role="status"></div>
+    </form>`;
+  wrap.hidden = false;
+  wrap.onclick = e => { if (e.target.closest("[data-chiudi]")) wrap.hidden = true; };
+  wrap.onsubmit = async e => {
+    e.preventDefault();
+    const p1 = wrap.querySelector("#pw-1").value, p2 = wrap.querySelector("#pw-2").value, msg = wrap.querySelector("#pw-msg");
+    if (p1.length < 6) { msg.textContent = "Almeno 6 caratteri."; return; }
+    if (p1 !== p2) { msg.textContent = "Le due password non sono uguali."; return; }
+    msg.textContent = "Salvo…";
+    try { await Store.cambiaPassword(p1); wrap.hidden = true; toast("Password salvata", 2500); }
+    catch(err){ msg.textContent = (err && err.message) || String(err); }
+  };
+}
 
 // ---------- import dell'export di Archidekt ----------
 function righeCsv(t){
@@ -801,7 +856,7 @@ function apriMenu(){
 
         <h3>Dove sono i dati</h3>
         <div class="sub">${!db ? "Non sei ancora collegato." : online ? `Collegato come <b>${esc(db.utente)}</b>: telefono e PC vedono gli stessi dati.` : Store.configurato ? "" : "I dati sono salvati solo in questo browser. Per averli uguali su telefono e PC configura Supabase, come spiega la guida."}</div>
-        ${online ? `<button class="btn sec piccolo" data-esci>Esci</button>` : ""}
+        ${online ? `<div class="due"><button class="btn sec piccolo" data-password>Scegli o cambia la password</button><button class="btn sec piccolo" data-esci>Esci</button></div>` : ""}
 
         <h3>Wishlist da Archidekt</h3>
         <div class="sub">Su Archidekt esporta i mazzi in CSV e carica qui il file. Uno <b>zip con tutti i mazzi</b> sostituisce tutta la wishlist importata; un <b>CSV</b> sostituisce solo il suo mazzo. Contano le carte nella categoria Wishlist. Le carte aggiunte a mano restano.</div>
@@ -853,11 +908,12 @@ function apriMenu(){
     e.target.value = ""; ridisegna();
   };
   wrap.onclick = async e => {
-    const t = e.target.closest("[data-chiudi],[data-esci],[data-toglimazzo],[data-aggiungi],[data-togliagg],[data-aggiorna],[data-esporta]");
+    const t = e.target.closest("[data-chiudi],[data-esci],[data-password],[data-toglimazzo],[data-aggiungi],[data-togliagg],[data-aggiorna],[data-esporta]");
     if (!t) return;
     if (t.hasAttribute("data-chiudi")) { wrap.hidden = true; ridisegnaMenu = null; return; }
     try {
       if (t.hasAttribute("data-esci")) return db.esci();
+      if (t.hasAttribute("data-password")) { ridisegnaMenu = null; apriPassword(false); return; }
       if (t.hasAttribute("data-toglimazzo")) { await db.collection("wishlist").doc(t.dataset.toglimazzo).delete(); toast("Mazzo tolto"); }
       if (t.hasAttribute("data-togliagg")) { await db.collection("aggiunte").doc(t.dataset.togliagg).delete(); toast("Tolta"); }
       if (t.hasAttribute("data-aggiungi")) {

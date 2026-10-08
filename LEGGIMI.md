@@ -7,6 +7,7 @@
 - la wishlist la **importi tu** dall'export di Archidekt, oppure **aggiungi una carta a mano** (Menu);
 - carte cercate, carrello e trovate sono **salvate online** e le vedi uguali su telefono e PC;
 - sul telefono si installa come un'app (icona nella schermata Home).
+- si entra con **email e password**, oppure con un link via email.
 
 Tutto il resto funziona come prima: viste per set, per colore e per mazzo, filtri, «La cerco», «Copia per i siti», carrello, «Trovata».
 
@@ -46,7 +47,11 @@ In Supabase apri **Authentication → URL Configuration** e incolla l'indirizzo 
 
 ## 4. Primo accesso e i tuoi dati di oggi
 
-1. Apri il sito, scrivi la tua email e premi **Mandami il link**. Apri il link che ti arriva dallo stesso dispositivo (telefono o PC): sei dentro, e la volta dopo non serve rifarlo.
+1. Apri il sito ed entra in uno dei due modi:
+   - **email e password**: la prima volta premi **Crea account**, apri la mail di conferma, poi torna sul sito ed entra con **Entra**. Se l'hai dimenticata, premi **Password dimenticata?**: ti arriva un link per sceglierne una nuova;
+   - **link via email**: premi **Entra con un link via email** e apri il link dallo stesso dispositivo.
+
+   Se entri col link, puoi scegliere una password anche dopo, da **Menu → Scegli o cambia la password**. Una volta dentro, la volta dopo non serve rientrare.
 2. **Menu → Carica una copia** e scegli il file `migrazione-07-10.json` che ti ho mandato a parte. Contiene la wishlist del 7 ottobre, Ghostly Prison aggiunta a mano, le 23 carte che stai cercando e le 17 trovate. Al primo caricamento l'app scarica i dati da Scryfall: ci mette circa mezzo minuto, poi li tiene in memoria per 24 ore.
 3. Sul telefono, dal menu del browser scegli **Aggiungi a schermata Home**.
 4. Facoltativo: in Supabase, **Authentication → Sign In / Providers**, disattiva **Allow new users to sign up**. Così nessun altro può creare un account sul tuo sito. Tu resti dentro.
@@ -75,6 +80,7 @@ In Supabase apri **Authentication → URL Configuration** e incolla l'indirizzo 
 
 ## Limiti da sapere
 
+- **Le mail di Supabase** (conferma dell'account, password dimenticata, link di accesso) partono dal servizio gratuito di Supabase, che ne manda poche all'ora: se ne chiedi tante di fila, aspetta qualche minuto.
 - **Senza connessione**: l'app mostra le carte e i dati dell'ultima volta. Quello che segni mentre sei offline resta solo sul telefono e non si sincronizza da solo: se succede, la pagina te lo dice.
 - **Scryfall** accetta al massimo 2 ricerche al secondo, per questo il primo caricamento richiede circa mezzo minuto. Se Scryfall non risponde, le carte restano in lista con la scritta «non ancora scaricata da Scryfall» e l'app riprova da sola dopo un minuto.
 - Le immagini e i dati delle carte sono di **Scryfall**: l'app li mostra senza modificarli e non è affiliata a Scryfall né a Wizards of the Coast.
