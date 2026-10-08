@@ -169,7 +169,7 @@ function gruppo(colori, tipo){
 
 // voci: [{nome, copie, mazzi}] -> {carte, errori}
 // una carta di cui Scryfall non ha dato i dati: resta in lista, cosi' la wishlist non si accorcia di nascosto
-const vuota = (v, perche) => ({chiave: chiave(v.nome), nome: v.nome, copie: v.copie, mazzi: v.mazzi, colori: [], gruppo: "Incolori",
+const vuota = (v, perche) => ({chiave: chiave(v.nome), nome: v.nome, copie: v.copie, mazzi: v.mazzi, per: v.per, colori: [], gruppo: "Incolori",
   tipo: "", cmc: 0, prezzo_min: null, stampe: [], testo: [], testo_it: null, aggiornata: Date.now(), problema: perche});
 async function costruisci(voci, avanzamento, vivo){
   const carte = [], errori = [], mancanti = [];
@@ -181,7 +181,7 @@ async function costruisci(voci, avanzamento, vivo){
       if (!d.trovata) { errori.push(v.nome); carte.push(vuota(v, "non trovata su Scryfall")); continue; }
       const ps = d.stampe.filter(s => s.eur != null).map(s => s.eur);
       const pf = d.stampe.filter(s => s.eur_foil != null).map(s => s.eur_foil);
-      carte.push({chiave: chiave(v.nome), nome: v.nome, copie: v.copie, mazzi: v.mazzi, colori: d.colori,
+      carte.push({chiave: chiave(v.nome), nome: v.nome, copie: v.copie, mazzi: v.mazzi, per: v.per, colori: d.colori,
         gruppo: gruppo(d.colori, d.tipo), tipo: d.tipo, cmc: d.cmc,
         prezzo_min: ps.length ? Math.min(...ps) : pf.length ? Math.min(...pf) : null,
         stampe: d.stampe, testo: d.testo, testo_it: d.testo_it, aggiornata: d.t});
