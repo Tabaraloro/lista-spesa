@@ -41,8 +41,9 @@ async function collegaDb(){
     }, err => { db = null; });
   } catch(e){ db = null; }
 }
-async function salvaTrovate(chiave){
-  const lista = trovate[chiave] || [];
+// lista e voci si passano esplicite quando si salvano piu' carte di fila: fra una scrittura e
+// l'altra puo' arrivare una rilettura dal database che rimette in memoria lo stato di prima
+async function salvaTrovate(chiave, lista = trovate[chiave] || []){
   scriviLocale();
   if (cercate[chiave] && perChiave[chiave] && completa(perChiave[chiave])) { delete cercate[chiave]; salvaCercata(chiave); }
   if (db) {
@@ -96,8 +97,7 @@ function collegaCarrello(){
     if (ridisegnaCarrello) ridisegnaCarrello();
   }, err => {});
 }
-async function salvaCarrello(chiave){
-  const voci = carrello[chiave] || [];
+async function salvaCarrello(chiave, voci = carrello[chiave] || []){
   scriviCarrelloLocale();
   if (!db) return;
   try {
@@ -380,14 +380,16 @@ function apriCarrello(){
     if (t.hasAttribute("data-svuota")) {
       if (conferma !== "svuota") { conferma = "svuota"; ridisegna(); return; }
       const chiavi = Object.keys(carrello); carrello = {};
-      conferma = null; render(); ridisegna(); for (const ch of chiavi) await salvaCarrello(ch); toast("Carrello svuotato"); return;
+      conferma = null; render(); ridisegna(); for (const ch of chiavi) await salvaCarrello(ch, []); toast("Carrello svuotato"); return;
     }
     if (t.hasAttribute("data-compra")) {
       if (conferma !== "compra") { conferma = "compra"; ridisegna(); return; }
       const vs = vociCarrello(); const chiavi = [...new Set(vs.map(x => x.ch))];
-      for (const ch of chiavi) { trovate[ch] = [...(trovate[ch] || []), ...carrello[ch].map(v => ({...v}))]; delete carrello[ch]; }
+      // il piano si fissa prima di scrivere: ogni carta passa dal carrello alle trovate con i suoi dati
+      const piano = chiavi.map(ch => ({ch, lista: [...(trovate[ch] || []), ...carrello[ch].map(v => ({...v}))]}));
+      for (const p of piano) { trovate[p.ch] = p.lista; delete carrello[p.ch]; }
       conferma = null; render(); ridisegna();
-      for (const ch of chiavi) { await salvaTrovate(ch); await salvaCarrello(ch); }
+      for (const p of piano) { await salvaTrovate(p.ch, p.lista); await salvaCarrello(p.ch, []); }
       toast(`Segnate comprate ${vs.length} ${vs.length === 1 ? "carta" : "carte"}`, 2400); return;
     }
   };
