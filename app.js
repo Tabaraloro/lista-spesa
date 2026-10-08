@@ -38,18 +38,19 @@ async function collegaDb(){
       const nuovo = {};
       snap.docs.forEach(d => { const b = d.data(); if (b && Array.isArray(b.trovate) && b.trovate.length) nuovo[d.id] = b.trovate; });
       trovate = nuovo; dbPronto = true; scriviLocale(); render();
-    }, err => { db = null; });
+    }, err => { db = null; toast("Non riesco a leggere le carte trovate salvate online: le modifiche restano su questo dispositivo", 6000); });
   } catch(e){ db = null; }
 }
 // lista e voci si passano esplicite quando si salvano piu' carte di fila: fra una scrittura e
 // l'altra puo' arrivare una rilettura dal database che rimette in memoria lo stato di prima
 async function salvaTrovate(chiave, lista = trovate[chiave] || []){
   scriviLocale();
-  if (cercate[chiave] && perChiave[chiave] && completa(perChiave[chiave])) { delete cercate[chiave]; salvaCercata(chiave); }
+  if (cercate[chiave] && perChiave[chiave] && completa(perChiave[chiave])) { delete cercate[chiave]; await salvaCercata(chiave); }
   if (db) {
     try {
       const doc = db.collection("trovate").doc(chiave);
-      if (lista.length) await doc.set({nome: perChiave[chiave].nome, copie_volute: perChiave[chiave].copie, trovate: lista});
+      const c = perChiave[chiave] || {nome: chiave, copie: lista.length};
+      if (lista.length) await doc.set({nome: c.nome, copie_volute: c.copie, trovate: lista});
       else await doc.delete();
     } catch(e){ toast("Salvato solo su questo telefono: " + (e && e.code || "errore")); }
   }
@@ -117,7 +118,8 @@ const mancanti = c => Math.max(0, c.copie - trovateDi(c.chiave) - nelCarrello(c.
 // ---------- filtri ----------
 const F = {vista:"set", cerca:"", mazzo:"", maxprezzo:"", soloit:false, nascondi:true, categoria:"", estesi:true};
 try { Object.assign(F, JSON.parse(localStorage.getItem("lista-spesa-filtri") || "{}")); } catch(e){}
-function salvaFiltri(){ try { localStorage.setItem("lista-spesa-filtri", JSON.stringify(F)); } catch(e){} }
+F.cerca = "";
+function salvaFiltri(){ try { localStorage.setItem("lista-spesa-filtri", JSON.stringify({...F, cerca: ""})); } catch(e){} }
 // le stampe di una carta che i filtri lasciano vedere (lingua e scaffale)
 function stampeDi(c){
   return c.stampe.filter(s => (F.soloit ? s.lingua === "it" : s.lingua === "en") && (!F.categoria || catDi(s) === F.categoria));
@@ -421,6 +423,7 @@ function misuraAlto(){
   document.documentElement.style.setProperty("--alto", Math.round(h.getBoundingClientRect().height + (parseFloat(getComputedStyle(h).top) || 0)) + "px");
 }
 addEventListener("resize", misuraAlto);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(misuraAlto);
 
 // ---------- carrello: nel foglio (Raccoglitore) o nella sua sezione (Elenco) ----------
 const vociCarrello = () => Object.entries(carrello).filter(([ch]) => perChiave[ch])
@@ -736,7 +739,8 @@ function apriFoglio(chiave, idStampa){
   const c = perChiave[chiave];
   const s = c.stampe.find(x => x.id === idStampa) || null;
   const ultimoNegozio = (() => { try { return localStorage.getItem("lista-spesa-negozio") || ""; } catch(e){ return ""; } })();
-  const mancano = c.mazzi.map(m => ({m, n: Math.max(0, 1 - trovatePer(chiave, m) - carrelloPer(chiave, m))})).filter(x => x.n > 0);
+  const volute = m => (c.per && c.per[m]) || 1;          // copie volute in quel mazzo (di solito una)
+  const mancano = c.mazzi.map(m => ({m, n: Math.max(0, volute(m) - trovatePer(chiave, m) - carrelloPer(chiave, m))})).filter(x => x.n > 0);
   const storico = trovate[chiave] || [];
   const nelC = carrello[chiave] || [];
   const wrap = document.getElementById("foglio-wrap");
@@ -746,7 +750,7 @@ function apriFoglio(chiave, idStampa){
   const verbo = () => modo === "carrello" ? "Nel carrello" : "Comprata";
   const scelte = () => mancano.length === 0 ? `<div class="sub">Tutte le copie sono già nel carrello o segnate come comprate.</div>` :
     mancano.length === 1 && c.copie === 1 ? `<button class="btn ${modo === "carrello" ? "carrello" : ""}" data-segna="${mancano[0].m}">${verbo()} <small>per ${mancano[0].m}</small></button>` :
-    mancano.map(x => `<button class="btn ${modo === "carrello" ? "carrello" : ""}" data-segna="${x.m}">${verbo()}: una copia <small>per ${x.m}</small></button>`).join("") +
+    mancano.map(x => `<button class="btn ${modo === "carrello" ? "carrello" : ""}" data-segna="${x.m}">${verbo()}: una copia <small>per ${x.m}${x.n > 1 ? ` (ne mancano ${x.n})` : ""}</small></button>`).join("") +
       (mancano.length > 1 ? `<button class="btn sec" data-segna="*">${verbo()}: tutte e ${mancano.length} <small>${mancano.map(x => x.m).join(", ")}</small></button>` : "");
   wrap.innerHTML = `<div class="velo" data-chiudi></div>
     <div class="foglio" role="dialog" aria-label="Segna come trovata">
@@ -804,8 +808,9 @@ function apriFoglio(chiave, idStampa){
 }
 // avviso in basso; con "annulla" mostra il pulsante Annulla, che chiama quella funzione
 let toastT = null, toastAnnulla = null;
-function toast(msg, ms, annulla){
+function toast(msg, ms, annulla, debole){
   const el = document.getElementById("toast");
+  if (debole && toastAnnulla && !el.hidden) return;          // un avviso di servizio non copre un «Annulla» ancora valido
   toastAnnulla = annulla || null;
   el.innerHTML = `<span>${esc(msg)}</span>${annulla ? `<button type="button" data-annulla>Annulla</button>` : ""}`;
   el.hidden = false; clearTimeout(toastT);
@@ -819,7 +824,10 @@ function toast(msg, ms, annulla){
 let wl = null, aggiunte = null;          // null: non ancora arrivate
 let ridisegnaMenu = null;                 // se il menu e' aperto, si ridisegna quando cambiano i dati
 function collegaWishlist(){
-  const errore = e => { statoCarico = "Non riesco a leggere la wishlist: " + esc(e && e.message || e); if (!datiPronti) render(); };
+  const errore = e => {
+    statoCarico = `<div><b>Non riesco a leggere i dati salvati online</b><br>${esc(e && e.message || e)}<br><br>Controlla la connessione. Se non usi l'app da più di una settimana, il progetto Supabase può essere in pausa: riattivalo dal sito di Supabase («Resume project»), poi ricarica.<br><br><button class="btn" type="button" onclick="location.reload()">Ricarica</button></div>`;
+    if (!datiPronti) render();
+  };
   db.collection("wishlist").onSnapshot(snap => { wl = {}; snap.docs.forEach(d => { wl[d.id] = d.data(); }); ricalcola(); if (ridisegnaMenu) ridisegnaMenu(); }, errore);
   db.collection("aggiunte").onSnapshot(snap => { aggiunte = {}; snap.docs.forEach(d => { aggiunte[d.id] = d.data(); }); ricalcola(); if (ridisegnaMenu) ridisegnaMenu(); }, errore);
 }
@@ -839,8 +847,9 @@ function vociWishlist(){
   }
   const voci = new Map();
   for (const mazzo of Object.keys(per).sort()) for (const [k, x] of per[mazzo]) {
-    const v = voci.get(k) || {nome: x.nome, copie: 0, mazzi: []};
+    const v = voci.get(k) || {nome: x.nome, copie: 0, mazzi: [], per: {}};
     v.copie += x.copie; if (!v.mazzi.includes(mazzo)) v.mazzi.push(mazzo);
+    v.per[mazzo] = (v.per[mazzo] || 0) + x.copie;
     voci.set(k, v);
   }
   return [...voci.values()].sort((a,b) => a.nome.localeCompare(b.nome));
@@ -867,7 +876,7 @@ async function caricaCarte(voci){
   const r = await Scry.costruisci(voci, (n, t) => {
     if (mio !== giro) return;
     if (!datiPronti) { statoCarico = `Carico le carte da Scryfall: ${n} di ${t}…`; render(); }
-    else if (n < t) toast(`Aggiorno da Scryfall: ${n} di ${t}`, 4000);
+    else if (n < t) toast(`Aggiorno da Scryfall: ${n} di ${t}`, 4000, null, true);
   }, () => mio === giro);
   if (!r || mio !== giro) return;
   carte = r.carte;
@@ -878,10 +887,10 @@ async function caricaCarte(voci){
   if (primo) giaRiletto = true;
   datiPronti = true; riempiMazzi(); render();
   if (r.mancanti.length) {
-    toast(`Scryfall non ha risposto per ${r.mancanti.length} ${r.mancanti.length === 1 ? "carta" : "carte"}: riprovo fra un minuto`, 6000);
+    toast(`Scryfall non ha risposto per ${r.mancanti.length} ${r.mancanti.length === 1 ? "carta" : "carte"}: riprovo fra un minuto`, 6000, null, true);
     clearTimeout(riprova); riprova = setTimeout(() => ricalcola(true), 60000);
-  } else if (r.errori.length) toast(`Non trovate su Scryfall: ${r.errori.join(", ")}`, 6000);
-  else if (!primo && carte.length) toast("Carte aggiornate", 1500);
+  } else if (r.errori.length) toast(`Non trovate su Scryfall: ${r.errori.join(", ")}`, 6000, null, true);
+  else if (!primo && carte.length) toast("Carte aggiornate", 1500, null, true);
   if (primo && db && db.ricarica) db.ricarica();       // ora si possono riconoscere le cercate uscite dalla wishlist
 }
 
@@ -1102,6 +1111,7 @@ function apriMenu(){
   };
   wrap.onchange = async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
+    if (!db) { toast("Prima entra con il tuo account, poi carica il file", 3000); e.target.value = ""; return; }
     try {
       if (e.target.hasAttribute("data-importa")) toast(await importaArchidekt(f), 4000);
       if (e.target.hasAttribute("data-salvataggio")) toast(await importaSalvataggio(f), 3000);
@@ -1218,7 +1228,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") document.get
   let segnato = false, daIndietro = false;
   new MutationObserver(() => {
     if (!wrap.hidden && !segnato) { segnato = true; history.pushState({foglio: true}, ""); }
-    else if (wrap.hidden && segnato) { segnato = false; if (!daIndietro) history.back(); }
+    else if (wrap.hidden && segnato) { segnato = false; if (!daIndietro && history.state && history.state.foglio) history.back(); }
     daIndietro = false;
   }).observe(wrap, {attributes: true, attributeFilter: ["hidden"]});
   addEventListener("popstate", () => { if (segnato && !wrap.hidden) { daIndietro = true; wrap.hidden = true; } });
