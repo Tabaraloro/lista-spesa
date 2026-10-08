@@ -69,6 +69,8 @@ function storeSupabase(sb, user){
           const giro = async () => {
             const {data, error} = await sb.from("stato").select("chiave,dati").eq("collezione", n);
             if (error) { if (err) err(error); return; }
+            // se nel frattempo e' partita una scrittura, questa lettura e' gia' vecchia: ne arriva un'altra alla fine
+            if (inCorso[n]) return;
             cb({docs: data.map(r => ({id: r.chiave, data: () => r.dati}))});
           };
           (ascolti[n] = ascolti[n] || []).push(giro); giro();
@@ -107,6 +109,9 @@ async function collega(){
   sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
   sb.auth.onAuthStateChange(ev => { if (ev === "PASSWORD_RECOVERY") recupero = true; });
   const {data} = await sb.auth.getSession();
+  // il link della mail porta un codice nell'indirizzo: una volta letto, si toglie, cosi' non resta
+  // nella cronologia e il tasto Indietro non lo ripropone
+  if (recupero && /type=recovery/.test(location.hash)) history.replaceState(history.state, "", QUI());
   const user = data && data.session && data.session.user;
   return user ? storeSupabase(sb, user) : null;        // null: configurato ma non collegato
 }
