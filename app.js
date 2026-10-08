@@ -371,6 +371,7 @@ function testata(){
   el("aspetto").title = `Passa all'aspetto ${ASPETTI[altro]}`;
   const nf = filtriAttivi();
   el("apri-filtri").innerHTML = `Filtri${nf ? ` · ${nf}` : ""}`;
+  el("aggiungi").hidden = !pronto;
   // conti
   const cs = carte.filter(daCercare);
   const nVoci = nCarrello();
@@ -690,7 +691,7 @@ function apriStampe(chiave, idImg){
       <div class="azioni-c">
         ${fatta ? "" : `<button class="btn ${cercata(c) ? "cerco-on" : "sec"}" data-cerco-f aria-pressed="${cercata(c)}">${cercata(c) ? "✓ La cerco" : "La cerco"}</button>`}
         <button class="btn ${fatta ? "ok" : ""}" data-trova-f>${fatta ? "✓ Trovata: modifica" : "Trovata"}</button>
-      </div>${stato ? `<div class="stato-c">${stato} · per ${esc(c.mazzi.join(", "))}</div>` : `<div class="stato-c">per ${esc(c.mazzi.join(", "))}</div>`}`;
+      </div><div class="stato-c">${stato ? stato + " · " : ""}per ${esc(c.mazzi.join(", "))}<button class="btn sec piccolo" type="button" data-togli-f>Togli dalla wishlist</button></div>`;
   };
   const disegna = () => {
     wrap.innerHTML = `<div class="velo" data-chiudi></div>
@@ -711,9 +712,10 @@ function apriStampe(chiave, idImg){
   wrap.hidden = false;
   wrap.onchange = null;
   wrap.onclick = ev => {
-    const t = ev.target.closest("[data-chiudi],[data-ordina],[data-scegli],[data-zoom],[data-lingua],[data-cerco-f],[data-trova-f]");
+    const t = ev.target.closest("[data-chiudi],[data-ordina],[data-scegli],[data-zoom],[data-lingua],[data-cerco-f],[data-trova-f],[data-togli-f]");
     if (!t) return;
     if (t.hasAttribute("data-chiudi")) { wrap.hidden = true; return; }
+    if (t.hasAttribute("data-togli-f")) { wrap.hidden = true; togliCarta(chiave); return; }
     if (t.hasAttribute("data-zoom")) { zoom = !zoom; t.classList.toggle("zoom", zoom); t.title = zoom ? "Tocca per rimpicciolire" : "Tocca per ingrandire"; return; }
     if (t.hasAttribute("data-cerco-f")) { toggleCerco(chiave); ridisegna(); return; }
     if (t.hasAttribute("data-trova-f")) { apriFoglio(chiave, idGrande); return; }
@@ -821,7 +823,9 @@ function toast(msg, ms, annulla, debole){
 // "wishlist": un documento per mazzo, {carte: [{nome, copie}], importato, file}
 // "aggiunte": un documento per carta e mazzo, {nome, mazzo, copie}; restano anche quando
 // si reimporta Archidekt, e se la carta compare poi nella Wishlist di quel mazzo non si conta due volte.
-let wl = null, aggiunte = null;          // null: non ancora arrivate
+// "escluse": le carte tolte a mano dalla wishlist, {nome, quando}: non tornano al prossimo import,
+// finche' non le rimetti dal Menu.
+let wl = null, aggiunte = null, escluse = {};   // null: non ancora arrivate
 let ridisegnaMenu = null;                 // se il menu e' aperto, si ridisegna quando cambiano i dati
 function collegaWishlist(){
   const errore = e => {
@@ -830,6 +834,7 @@ function collegaWishlist(){
   };
   db.collection("wishlist").onSnapshot(snap => { wl = {}; snap.docs.forEach(d => { wl[d.id] = d.data(); }); ricalcola(); if (ridisegnaMenu) ridisegnaMenu(); }, errore);
   db.collection("aggiunte").onSnapshot(snap => { aggiunte = {}; snap.docs.forEach(d => { aggiunte[d.id] = d.data(); }); ricalcola(); if (ridisegnaMenu) ridisegnaMenu(); }, errore);
+  db.collection("escluse").onSnapshot(snap => { escluse = {}; snap.docs.forEach(d => { escluse[d.id] = d.data() || {}; }); ricalcola(); if (ridisegnaMenu) ridisegnaMenu(); }, err => {});
 }
 function vociWishlist(){
   const per = {};                        // mazzo -> Map(chiave -> {nome, copie})
@@ -847,6 +852,7 @@ function vociWishlist(){
   }
   const voci = new Map();
   for (const mazzo of Object.keys(per).sort()) for (const [k, x] of per[mazzo]) {
+    if (escluse[k]) continue;
     const v = voci.get(k) || {nome: x.nome, copie: 0, mazzi: [], per: {}};
     v.copie += x.copie; if (!v.mazzi.includes(mazzo)) v.mazzi.push(mazzo);
     v.per[mazzo] = (v.per[mazzo] || 0) + x.copie;
@@ -1021,7 +1027,7 @@ async function importaArchidekt(file){
 }
 
 // ---------- salvataggio: copia di tutti i dati, e ripristino ----------
-const COLLEZIONI = ["wishlist", "aggiunte", "cercate", "carrello", "trovate"];
+const COLLEZIONI = ["wishlist", "aggiunte", "escluse", "cercate", "carrello", "trovate"];
 function leggiUnaVolta(n){
   return new Promise((ok, ko) => {
     let stop = null, fatto = false;
@@ -1048,59 +1054,10 @@ async function importaSalvataggio(file){
   return `${n} documenti caricati`;
 }
 
-// ---------- menu ----------
-function apriMenu(){
-  const wrap = document.getElementById("foglio-wrap");
-  let suggTimer = null;
-  const disegna = () => {
-    const online = db && db.modo === "online";
-    const mazziWl = Object.entries(wl || {}).sort((a,b) => a[0].localeCompare(b[0]));
-    const agg = Object.entries(aggiunte || {}).sort((a,b) => a[1].nome.localeCompare(b[1].nome));
-    wrap.innerHTML = `<div class="velo" data-chiudi></div>
-      <div class="foglio menu" role="dialog" aria-label="Menu">
-        <div class="testa"><div><h2>Menu</h2></div><button class="btn sec" data-chiudi aria-label="Chiudi">✕</button></div>
-
-        <h3>Aspetto</h3>
-        <div class="sub">Come vedere la lista su questo dispositivo. <b>Elenco</b>: righe compatte e le sezioni nella barra in basso. <b>Raccoglitore</b>: le carte in griglia con le immagini grandi. Si cambia anche col pulsante accanto a Menu.</div>
-        <div class="ordina">${Object.entries(ASPETTI).map(([k, n]) => `<button data-aspetto="${k}" aria-pressed="${aspetto === k}">${n}</button>`).join("")}</div>
-
-        <h3>Dove sono i dati</h3>
-        <div class="sub">${!db ? "Non sei ancora collegato." : online ? `Collegato come <b>${esc(db.utente)}</b>: telefono e PC vedono gli stessi dati.` : Store.configurato ? "" : "I dati sono salvati solo in questo browser. Per averli uguali su telefono e PC configura Supabase, come spiega la guida."}</div>
-        ${online ? `<div class="due"><button class="btn sec piccolo" data-password>Scegli o cambia la password</button><button class="btn sec piccolo" data-esci>Esci</button></div>` : ""}
-
-        <h3>Wishlist da Archidekt</h3>
-        <div class="sub">Su Archidekt esporta i mazzi in CSV e carica qui il file. Uno <b>zip con tutti i mazzi</b> sostituisce tutta la wishlist importata; un <b>CSV</b> sostituisce solo il suo mazzo. Contano le carte nella categoria Wishlist. Le carte aggiunte a mano restano.</div>
-        <label class="btn" style="display:inline-block">Importa export di Archidekt<input type="file" accept=".zip,.csv" data-importa hidden></label>
-        ${mazziWl.length ? `<div class="storico">${mazziWl.map(([m, d]) => `<div><span>${esc(m)} · ${(d.carte || []).length} in wishlist${d.importato ? ` · ${d.importato}` : ""}</span><button class="btn sec" data-toglimazzo="${esc(m)}">Togli</button></div>`).join("")}</div>` : ""}
-
-        <h3>Aggiungi una carta a mano</h3>
-        <div class="campi tre">
-          <input id="m-nome" list="m-sugg" placeholder="Nome della carta (in inglese)" autocomplete="off">
-          <input id="m-mazzo" list="m-mazzi" placeholder="Mazzo" autocomplete="off">
-          <input id="m-copie" type="number" min="1" step="1" value="1" inputmode="numeric" aria-label="Copie">
-        </div>
-        <datalist id="m-sugg"></datalist>
-        <datalist id="m-mazzi">${mazziTutti.map(m => `<option value="${esc(m)}">`).join("")}</datalist>
-        <button class="btn" data-aggiungi>Aggiungi alla wishlist</button>
-        ${agg.length ? `<div class="storico"><div class="sub">Aggiunte a mano (non sono su Archidekt: aggiungile anche lì, o restano solo qui)</div>${agg.map(([id, a]) => `<div><span>${esc(a.nome)} · ${esc(a.mazzo)}${a.copie > 1 ? ` · ${a.copie} copie` : ""}</span><button class="btn sec" data-togliagg="${esc(id)}">Togli</button></div>`).join("")}</div>` : ""}
-
-        <h3>Prezzi e stampe</h3>
-        <div class="sub">Vengono da Scryfall e restano in memoria per 24 ore${generato ? `; gli ultimi sono del ${generato}` : ""}.</div>
-        <button class="btn sec" data-aggiorna>Aggiorna adesso da Scryfall</button>
-
-        <h3>Copia dei dati</h3>
-        <div class="sub">Scarica un file con wishlist, carte cercate, carrello e trovate, oppure ricaricane uno: serve come copia di sicurezza e per portare qui i dati della vecchia pagina.</div>
-        <div class="due"><button class="btn sec" data-esporta>Scarica una copia</button>
-          <label class="btn sec" style="text-align:center">Carica una copia<input type="file" accept=".json,application/json" data-salvataggio hidden></label></div>
-      </div>`;
-  };
-  disegna();
-  wrap.hidden = false;
-  const ridisegna = () => {
-    if (wrap.hidden || !wrap.querySelector(".foglio.menu")) { ridisegnaMenu = null; return; }
-    if (document.activeElement && wrap.contains(document.activeElement) && document.activeElement.tagName === "INPUT" && document.activeElement.type !== "file") return;
-    const f = wrap.querySelector(".foglio"); const y = f ? f.scrollTop : 0; disegna(); const g = wrap.querySelector(".foglio"); if (g) g.scrollTop = y; };
-  ridisegnaMenu = ridisegna;
+// ---------- aggiungere una carta a mano, e toglierla ----------
+const idAggiunta = (nome, mazzo) => `${Scry.chiave(nome)}@${Scry.chiave(mazzo)}`;
+let suggTimer = null;
+function suggerisci(wrap){
   wrap.oninput = e => {
     if (e.target.id !== "m-nome") return;
     clearTimeout(suggTimer);
@@ -1109,6 +1066,138 @@ function apriMenu(){
       try { const s = await Scry.suggerimenti(q); const dl = wrap.querySelector("#m-sugg"); if (dl) dl.innerHTML = s.map(n => `<option value="${esc(n)}">`).join(""); } catch(err){}
     }, 250);
   };
+}
+function apriAggiungi(){
+  if (!db) { toast("Prima entra con il tuo account", 2500); return; }
+  const wrap = document.getElementById("foglio-wrap");
+  const ultimo = (() => { try { return localStorage.getItem("lista-spesa-ultimo-mazzo") || ""; } catch(e){ return ""; } })();
+  wrap.innerHTML = `<div class="velo" data-chiudi></div>
+    <form class="foglio" role="dialog" aria-label="Aggiungi una carta" id="agg-form" autocomplete="off">
+      <div class="testa"><div><h2>Aggiungi una carta</h2>
+        <div class="sub">Il nome in inglese: mentre scrivi, i suggerimenti arrivano da Scryfall. La carta resta in wishlist anche quando reimporti Archidekt.</div></div>
+        <button class="btn sec" type="button" data-chiudi aria-label="Chiudi">✕</button></div>
+      <div class="campi tre">
+        <input id="m-nome" list="m-sugg" placeholder="Nome della carta" required autofocus>
+        <input id="m-mazzo" list="m-mazzi" placeholder="Mazzo" value="${esc(mazziTutti.includes(ultimo) ? ultimo : "")}" required>
+        <input id="m-copie" type="number" min="1" step="1" value="1" inputmode="numeric" aria-label="Copie">
+      </div>
+      <datalist id="m-sugg"></datalist>
+      <datalist id="m-mazzi">${mazziTutti.map(m => `<option value="${esc(m)}">`).join("")}</datalist>
+      <div class="scelte"><button class="btn" type="submit">Aggiungi alla wishlist</button><button class="btn sec" type="button" data-chiudi>Annulla</button></div>
+      <div class="sub" id="agg-msg" role="status"></div>
+    </form>`;
+  wrap.hidden = false;
+  suggerisci(wrap);
+  wrap.onchange = null;
+  wrap.onclick = e => { if (e.target.closest("[data-chiudi]")) wrap.hidden = true; };
+  wrap.onsubmit = async e => {
+    e.preventDefault();
+    const nome = wrap.querySelector("#m-nome").value.trim(), mazzo = wrap.querySelector("#m-mazzo").value.trim();
+    const copie = Math.max(1, Number(wrap.querySelector("#m-copie").value) || 1);
+    const msg = wrap.querySelector("#agg-msg");
+    if (!nome || !mazzo) { msg.textContent = "Scrivi il nome della carta e il mazzo."; return; }
+    const k = Scry.chiave(nome);
+    if (perChiave[k] && perChiave[k].mazzi.includes(mazzo)) { msg.textContent = `${nome} è già in wishlist per ${mazzo}.`; return; }
+    msg.textContent = "Salvo…";
+    try {
+      try { localStorage.setItem("lista-spesa-ultimo-mazzo", mazzo); } catch(err){}
+      const eraEsclusa = escluse[k] ? {...escluse[k]} : null;
+      if (eraEsclusa) await db.collection("escluse").doc(k).delete();      // se l'avevi tolta, torna
+      await db.collection("aggiunte").doc(idAggiunta(nome, mazzo)).set({nome, mazzo, copie});
+      wrap.hidden = true;
+      toast(`${nome}: aggiunta per ${mazzo}`, 5000, async () => {
+        try { await db.collection("aggiunte").doc(idAggiunta(nome, mazzo)).delete(); if (eraEsclusa) await db.collection("escluse").doc(k).set(eraEsclusa); }
+        catch(err){ toast("Non è andata: " + (err && err.message || err), 4000); }
+      });
+    } catch(err){ msg.textContent = "Non è andata: " + (err && err.message || err); }
+  };
+  setTimeout(() => { const i = wrap.querySelector("#m-nome"); if (i) i.focus(); }, 50);
+}
+// Togliere una carta: le sue aggiunte a mano si cancellano; se viene da Archidekt finisce fra le
+// escluse, cosi' non torna al prossimo import (dal Menu si puo' rimettere).
+async function togliCarta(chiave){
+  const c = perChiave[chiave]; if (!c || !db) return;
+  const agg = Object.entries(aggiunte || {}).filter(([id, a]) => Scry.chiave(a.nome) === chiave).map(([id, a]) => [id, {...a}]);
+  const daArchidekt = Object.values(wl || {}).some(d => (d.carte || []).some(x => Scry.chiave(x.nome) === chiave));
+  try {
+    for (const [id] of agg) await db.collection("aggiunte").doc(id).delete();
+    if (daArchidekt) await db.collection("escluse").doc(chiave).set({nome: c.nome, quando: oggi()});
+  } catch(err){ toast("Non è andata: " + (err && err.message || err), 4000); return; }
+  toast(`${c.nome}: tolta dalla wishlist`, 6000, async () => {
+    try {
+      if (daArchidekt) await db.collection("escluse").doc(chiave).delete();
+      for (const [id, a] of agg) await db.collection("aggiunte").doc(id).set(a);
+    } catch(err){ toast("Non è andata: " + (err && err.message || err), 4000); }
+  });
+}
+
+// ---------- menu ----------
+function apriMenu(){
+  const wrap = document.getElementById("foglio-wrap");
+  const disegna = () => {
+    const online = db && db.modo === "online";
+    const mazziWl = Object.entries(wl || {}).sort((a,b) => a[0].localeCompare(b[0]));
+    const nAgg = Object.keys(aggiunte || {}).length;
+    const tolte = Object.entries(escluse || {}).sort((a,b) => (a[1].nome || "").localeCompare(b[1].nome || ""));
+    wrap.innerHTML = `<div class="velo" data-chiudi></div>
+      <div class="foglio menu" role="dialog" aria-label="Menu">
+        <div class="testa"><div><h2>Menu</h2></div><button class="btn sec" data-chiudi aria-label="Chiudi">✕</button></div>
+
+        <section class="blocco">
+          <h3>Account</h3>
+          <div class="sub">${!db ? "Non sei collegato." : online ? `Collegato come <b>${esc(db.utente)}</b>: telefono e PC vedono gli stessi dati.` : Store.configurato ? "Collegato." : "Dati salvati solo in questo browser (Supabase non configurato: vedi la guida)."}</div>
+          ${online ? `<div class="due"><button class="btn sec" data-password>Cambia password</button><button class="btn sec" data-esci>Esci</button></div>` : ""}
+        </section>
+
+        <section class="blocco">
+          <h3>Wishlist</h3>
+          <div class="sub">Viene dall'export di Archidekt (le carte nella categoria Wishlist). Uno zip con tutti i mazzi la sostituisce tutta, un CSV solo il suo mazzo.${nAgg ? ` ${nAgg} ${nAgg === 1 ? "carta aggiunta" : "carte aggiunte"} a mano col pulsante «+».` : ""}</div>
+          <label class="btn" style="display:block;text-align:center">Importa l'export di Archidekt<input type="file" accept=".zip,.csv" data-importa hidden></label>
+          ${mazziWl.length ? `<div class="storico">${mazziWl.map(([m, d]) => `<div><span>${esc(m)} <small class="sd">${(d.carte || []).length} carte${d.importato ? ` · ${d.importato}` : ""}</small></span><button class="btn sec" data-toglimazzo="${esc(m)}">Togli</button></div>`).join("")}</div>` : ""}
+          ${tolte.length ? `<details class="piega"><summary>Carte tolte a mano <small class="sd">${tolte.length}</small></summary>
+            <div class="sub">Non tornano quando reimporti Archidekt. «Rimetti» le fa tornare.</div>
+            <div class="storico">${tolte.map(([k, x]) => `<div><span>${esc(x.nome || k)}${x.quando ? ` <small class="sd">${esc(x.quando)}</small>` : ""}</span><button class="btn sec" data-rimetti="${esc(k)}">Rimetti</button></div>`).join("")}</div></details>` : ""}
+        </section>
+
+        <section class="blocco">
+          <h3>Aspetto</h3>
+          <div class="ordina">${Object.entries(ASPETTI).map(([k, n]) => `<button data-aspetto="${k}" aria-pressed="${aspetto === k}">${n}</button>`).join("")}</div>
+          <div class="sub"><b>Elenco</b>: righe compatte, sezioni nella barra in basso. <b>Raccoglitore</b>: griglia di immagini grandi.</div>
+        </section>
+
+        <section class="blocco">
+          <h3>Dati</h3>
+          <div class="sub">Prezzi e stampe arrivano da Scryfall e si rinnovano ogni 24 ore${generato ? ` (ultimi: ${generato})` : ""}.</div>
+          <button class="btn sec" data-aggiorna style="width:100%">Aggiorna adesso da Scryfall</button>
+          <div class="due" style="margin-top:8px"><button class="btn sec" data-esporta>Scarica una copia</button>
+            <label class="btn sec" style="text-align:center">Carica una copia<input type="file" accept=".json,application/json" data-salvataggio hidden></label></div>
+          <div class="sub" style="margin-top:6px">La copia è un file con wishlist, carte cercate, carrello e trovate: serve come salvataggio.</div>
+        </section>
+
+        <details class="piega blocco"><summary>Come funziona</summary>
+          <div class="sub">Una carta fa questo giro:</div>
+          <ol class="sub passi">
+            <li><b>Wishlist</b>: tutte le carte che vorresti. Il segnalibro (o «La cerco» nella scheda) la mette fra quelle che cerchi.</li>
+            <li><b>La cerco</b>: quelle che cerchi in negozio o online. «Copia per i siti» prepara la lista per Cardmarket e CardTrader.</li>
+            <li><b>Carrello</b>: trovate, con prezzo e negozio, ma non ancora comprate. Qui vedi il totale e il confronto col prezzo di riferimento.</li>
+            <li><b>Trovate</b>: comprate. «Comprate tutte» nel carrello le sposta qui.</li>
+          </ol>
+          <div class="sub">Tocca una carta per la scheda: immagine grande, testo, tutte le stampe, «Trovata» e «Togli dalla wishlist». Il pulsante «+» in alto aggiunge una carta a mano.</div>
+        </details>
+      </div>`;
+  };
+  disegna();
+  wrap.hidden = false;
+  const ridisegna = () => {
+    if (wrap.hidden || !wrap.querySelector(".foglio.menu")) { ridisegnaMenu = null; return; }
+    const f = wrap.querySelector(".foglio"); const y = f ? f.scrollTop : 0;
+    const aperte = [...wrap.querySelectorAll("details[open]")].map((d, i) => d.querySelector("summary").textContent);
+    disegna();
+    const g = wrap.querySelector(".foglio"); if (g) g.scrollTop = y;
+    wrap.querySelectorAll("details").forEach(d => { if (aperte.includes(d.querySelector("summary").textContent)) d.open = true; });
+  };
+  ridisegnaMenu = ridisegna;
+  wrap.oninput = null; wrap.onsubmit = null;
   wrap.onchange = async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
     if (!db) { toast("Prima entra con il tuo account, poi carica il file", 3000); e.target.value = ""; return; }
@@ -1119,30 +1208,28 @@ function apriMenu(){
     e.target.value = ""; ridisegna();
   };
   wrap.onclick = async e => {
-    const t = e.target.closest("[data-chiudi],[data-esci],[data-password],[data-toglimazzo],[data-aggiungi],[data-togliagg],[data-aggiorna],[data-esporta],[data-aspetto]");
-    if (!t) return;
+    // "button[data-aspetto]": anche <body> ha data-aspetto, e closest() salirebbe fino a li'
+    const t = e.target.closest("[data-chiudi],[data-esci],[data-password],[data-toglimazzo],[data-rimetti],[data-aggiorna],[data-esporta],button[data-aspetto]");
+    if (!t || !wrap.contains(t)) return;
     if (t.hasAttribute("data-chiudi")) { wrap.hidden = true; ridisegnaMenu = null; return; }
     if (t.hasAttribute("data-aspetto")) { scegliAspetto(t.dataset.aspetto); ridisegna(); return; }
     try {
       if (t.hasAttribute("data-esci")) return db.esci();
       if (t.hasAttribute("data-password")) { ridisegnaMenu = null; apriPassword(false); return; }
-      if (t.hasAttribute("data-toglimazzo")) { await db.collection("wishlist").doc(t.dataset.toglimazzo).delete(); toast("Mazzo tolto"); }
-      if (t.hasAttribute("data-togliagg")) { await db.collection("aggiunte").doc(t.dataset.togliagg).delete(); toast("Tolta"); }
-      if (t.hasAttribute("data-aggiungi")) {
-        const nome = wrap.querySelector("#m-nome").value.trim(), mazzo = wrap.querySelector("#m-mazzo").value.trim();
-        const copie = Math.max(1, Number(wrap.querySelector("#m-copie").value) || 1);
-        if (!nome || !mazzo) { toast("Scrivi il nome della carta e il mazzo"); return; }
-        await db.collection("aggiunte").doc(`${Scry.chiave(nome)}@${Scry.chiave(mazzo)}`).set({nome, mazzo, copie});
-        wrap.querySelector("#m-nome").value = ""; document.activeElement && document.activeElement.blur();
-        toast(`${nome}: aggiunta per ${mazzo}`, 2500);
+      if (t.hasAttribute("data-toglimazzo")) {
+        const m = t.dataset.toglimazzo, prima = wl && wl[m] ? JSON.parse(JSON.stringify(wl[m])) : null;
+        await db.collection("wishlist").doc(m).delete();
+        toast(`${m}: mazzo tolto dalla wishlist`, 6000, prima ? async () => { try { await db.collection("wishlist").doc(m).set(prima); } catch(err){ toast("Non è andata: " + (err && err.message || err), 4000); } } : null);
       }
-      if (t.hasAttribute("data-aggiorna")) { Scry.svuotaCache(); wrap.hidden = true; ricalcola(true); return; }
+      if (t.hasAttribute("data-rimetti")) { const k = t.dataset.rimetti, nome = escluse[k] && escluse[k].nome; await db.collection("escluse").doc(k).delete(); toast(`${nome || k}: torna in wishlist`, 2500); }
+      if (t.hasAttribute("data-aggiorna")) { Scry.svuotaCache(); wrap.hidden = true; ridisegnaMenu = null; ricalcola(true); return; }
       if (t.hasAttribute("data-esporta")) { await esportaTutto(); return; }
     } catch(err){ toast("Non è andata: " + (err && err.message || err), 5000); }
     setTimeout(ridisegna, 300);
   };
 }
 document.getElementById("apri-menu").addEventListener("click", apriMenu);
+document.getElementById("aggiungi").addEventListener("click", apriAggiungi);
 
 // ---------- eventi ----------
 const oggi = () => new Date().toISOString().slice(0,10);
