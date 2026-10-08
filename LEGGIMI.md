@@ -4,12 +4,21 @@
 
 - **immagini, testo e prezzi arrivano dal vivo da Scryfall**: tutte le stampe, anche quelle uscite ieri, senza passare dal PC;
 - **l'immagine grande** di ogni stampa si apre con un tocco;
-- la wishlist la **importi tu** dall'export di Archidekt, oppure **aggiungi una carta a mano** (Menu);
+- la wishlist la **importi tu** dall'export di Archidekt, oppure **aggiungi una carta a mano** col pulsante «+»;
 - carte cercate, carrello e trovate sono **salvate online** e le vedi uguali su telefono e PC;
 - sul telefono si installa come un'app (icona nella schermata Home).
 - si entra con **email e password**, oppure con un link via email.
 
-Tutto il resto funziona come prima: viste per set, per colore e per mazzo, filtri, «La cerco», «Copia per i siti», carrello, «Trovata».
+Le carte stanno in quattro sezioni, che seguono il giro di una carta: **Wishlist** (tutte quelle che vorresti), **La cerco** (quelle che stai cercando in negozio o online), **Carrello** (trovate, con il prezzo, ma non ancora comprate) e **Trovate**. In Wishlist e La cerco puoi raggruppare per set, per colore o per mazzo.
+
+## Due aspetti, a scelta
+
+- **Elenco**: righe compatte, una sola azione per riga (il segnalibro per «La cerco», «Trovata», …) e le quattro sezioni nella barra in basso.
+- **Raccoglitore**: le carte in griglia con le immagini grandi, come le pagine di un raccoglitore; le sezioni sono pulsanti in alto e il carrello è una barra in basso. Tocchi una carta e nella scheda trovi «La cerco» e «Trovata».
+
+Si cambia con il pulsante accanto a **Menu**, oppure da **Menu → Aspetto**. La scelta resta su quel dispositivo: puoi usare il Raccoglitore sul telefono e l'Elenco sul PC.
+
+Nella scheda di una carta, toccare una stampa la mostra grande; «Trovata» usa la stampa scelta. «Togli dalla wishlist» la toglie: se viene da Archidekt non torna al prossimo import (da **Menu → Wishlist → Carte tolte a mano** la rimetti). Dopo «La cerco», «Comprate tutte», «Togli» e «Svuota il carrello» compare per qualche secondo **Annulla**. Il tasto Indietro del telefono chiude la scheda aperta.
 
 ## Cosa serve
 
@@ -51,8 +60,8 @@ In Supabase apri **Authentication → URL Configuration** e incolla l'indirizzo 
    - **email e password**: la prima volta premi **Crea account**, apri la mail di conferma, poi torna sul sito ed entra con **Entra**. Se l'hai dimenticata, premi **Password dimenticata?**: ti arriva un link per sceglierne una nuova;
    - **link via email**: premi **Entra con un link via email** e apri il link dallo stesso dispositivo.
 
-   Se entri col link, puoi scegliere una password anche dopo, da **Menu → Scegli o cambia la password**. Una volta dentro, la volta dopo non serve rientrare.
-2. **Menu → Carica una copia** e scegli il file `migrazione-07-10.json` che ti ho mandato a parte. Contiene la wishlist del 7 ottobre, Ghostly Prison aggiunta a mano, le 23 carte che stai cercando e le 17 trovate. Al primo caricamento l'app scarica i dati da Scryfall: ci mette circa mezzo minuto, poi li tiene in memoria per 24 ore.
+   Se entri col link, puoi scegliere una password anche dopo, da **Menu → Account → Cambia password**. Una volta dentro, la volta dopo non serve rientrare.
+2. **Menu → Dati → Carica una copia** e scegli il file `migrazione-07-10.json` che ti ho mandato a parte. Contiene la wishlist del 7 ottobre, Ghostly Prison aggiunta a mano, le 23 carte che stai cercando e le 17 trovate. Al primo caricamento l'app scarica i dati da Scryfall: ci mette circa mezzo minuto, poi li tiene in memoria per 24 ore.
 3. Sul telefono, dal menu del browser scegli **Aggiungi a schermata Home**.
 4. Facoltativo: in Supabase, **Authentication → Sign In / Providers**, disattiva **Allow new users to sign up**. Così nessun altro può creare un account sul tuo sito. Tu resti dentro.
 
@@ -60,10 +69,10 @@ In Supabase apri **Authentication → URL Configuration** e incolla l'indirizzo 
 
 ## Uso di tutti i giorni
 
-- **Wishlist aggiornata**: su Archidekt esporta i mazzi, poi apri **Menu → Importa export di Archidekt**. Uno zip con tutti i mazzi sostituisce tutta la wishlist importata; un singolo CSV sostituisce solo quel mazzo. Le carte aggiunte a mano restano.
-- **Una carta in più senza passare da Archidekt**: **Menu → Aggiungi una carta a mano**. Mentre scrivi il nome, l'app ti suggerisce i nomi di Scryfall.
-- **Prezzi**: si aggiornano da soli una volta al giorno. **Menu → Aggiorna adesso da Scryfall** li riscarica subito.
-- **Copia di sicurezza**: **Menu → Scarica una copia** salva un file con tutti i tuoi dati.
+- **Wishlist aggiornata**: su Archidekt esporta i mazzi, poi apri **Menu → Wishlist → Importa l'export di Archidekt**. Uno zip con tutti i mazzi sostituisce tutta la wishlist importata; un singolo CSV sostituisce solo quel mazzo. Le carte aggiunte a mano restano.
+- **Una carta in più senza passare da Archidekt**: il pulsante **«+»** accanto a Filtri. Mentre scrivi il nome, l'app ti suggerisce i nomi di Scryfall.
+- **Prezzi**: si aggiornano da soli una volta al giorno. **Menu → Dati → Aggiorna adesso da Scryfall** li riscarica subito.
+- **Copia di sicurezza**: **Menu → Dati → Scarica una copia** salva un file con tutti i tuoi dati.
 
 ## File
 
