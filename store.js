@@ -43,13 +43,23 @@ function storeLocale(){
 function storeSupabase(sb, user){
   const ascolti = {};          // collezione -> [funzione che rilegge e chiama cb]
   const rileggi = n => (ascolti[n] || []).forEach(f => f());
-  // dopo una scrittura si rilegge la collezione anche senza aspettare il tempo reale (a raffica: una volta sola)
-  const attese = {};
-  const rileggiPresto = n => { clearTimeout(attese[n]); attese[n] = setTimeout(() => rileggi(n), 150); };
+  // Dopo una scrittura si rilegge la collezione, anche senza aspettare il tempo reale; a raffica,
+  // una volta sola. Mentre ci sono scritture in corso sulla collezione la rilettura aspetta: se no
+  // riporterebbe in pagina lo stato di prima delle scritture non ancora finite.
+  const attese = {}, inCorso = {};
+  const rileggiPresto = n => {
+    clearTimeout(attese[n]);
+    attese[n] = setTimeout(() => { if (inCorso[n]) return; rileggi(n); }, 150);
+  };
+  const scrivendo = async (n, fai) => {
+    inCorso[n] = (inCorso[n] || 0) + 1;
+    try { return await fai(); }
+    finally { inCorso[n]--; rileggiPresto(n); }
+  };
   sb.channel("stato-" + user.id)
     .on("postgres_changes", {event: "*", schema: "public", table: "stato", filter: `user_id=eq.${user.id}`}, p => {
       const n = (p.new && p.new.collezione) || (p.old && p.old.collezione);
-      if (n) rileggi(n); else Object.keys(ascolti).forEach(rileggi);
+      if (n) rileggiPresto(n); else Object.keys(ascolti).forEach(rileggiPresto);
     }).subscribe();
   return {
     modo: "online", utente: user.email,
@@ -66,16 +76,18 @@ function storeSupabase(sb, user){
         },
         doc(id){
           return {
-            async set(obj){
-              const {error} = await sb.from("stato").upsert({user_id: user.id, collezione: n, chiave: id, dati: obj,
-                aggiornato: new Date().toISOString()}, {onConflict: "user_id,collezione,chiave"});
-              if (error) throw error;
-              rileggiPresto(n);
+            set(obj){
+              return scrivendo(n, async () => {
+                const {error} = await sb.from("stato").upsert({user_id: user.id, collezione: n, chiave: id, dati: obj,
+                  aggiornato: new Date().toISOString()}, {onConflict: "user_id,collezione,chiave"});
+                if (error) throw error;
+              });
             },
-            async delete(){
-              const {error} = await sb.from("stato").delete().eq("collezione", n).eq("chiave", id);
-              if (error) throw error;
-              rileggiPresto(n);
+            delete(){
+              return scrivendo(n, async () => {
+                const {error} = await sb.from("stato").delete().eq("collezione", n).eq("chiave", id);
+                if (error) throw error;
+              });
             },
           };
         },
