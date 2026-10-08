@@ -115,7 +115,7 @@ const cercata = c => !!cercate[c.chiave] && !completa(c);
 const mancanti = c => Math.max(0, c.copie - trovateDi(c.chiave) - nelCarrello(c.chiave));
 
 // ---------- filtri ----------
-const F = {vista:"set", cerca:"", mazzo:"", maxprezzo:"", soloit:false, nascondi:true, categoria:"", estesi:true, solocerco:false};
+const F = {vista:"set", cerca:"", mazzo:"", maxprezzo:"", soloit:false, nascondi:true, categoria:"", estesi:true};
 try { Object.assign(F, JSON.parse(localStorage.getItem("lista-spesa-filtri") || "{}")); } catch(e){}
 function salvaFiltri(){ try { localStorage.setItem("lista-spesa-filtri", JSON.stringify(F)); } catch(e){} }
 // le stampe di una carta che i filtri lasciano vedere (lingua e scaffale)
@@ -126,165 +126,303 @@ function prezzoMin(c){
   const p = stampeDi(c).filter(s => s.eur != null).map(s => s.eur);
   return p.length ? Math.min(...p) : (F.categoria || F.soloit ? null : c.prezzo_min);
 }
-function passa(c){
-  if (F.cerca && !c.nome.toLowerCase().includes(F.cerca.toLowerCase())) return false;
+const cercaNome = c => !F.cerca || c.nome.toLowerCase().includes(F.cerca.toLowerCase());
+// ricerca, mazzo, scaffale, lingua e prezzo: valgono per Wishlist e La cerco
+function passaFiltri(c){
+  if (!cercaNome(c)) return false;
   if (F.mazzo && !c.mazzi.includes(F.mazzo)) return false;
   if ((F.soloit || F.categoria) && !stampeDi(c).length) return false;
   const p = prezzoMin(c);
   if (F.maxprezzo !== "" && p != null && p > Number(F.maxprezzo)) return false;
-  if (F.nascondi && completa(c)) return false;
-  if (F.solocerco && !cercata(c)) return false;
   return true;
 }
+const filtriAttivi = () => [F.mazzo, F.categoria, F.maxprezzo !== "", F.soloit, !F.nascondi].filter(Boolean).length;
 
-// ---------- rendering ----------
+// ---------- aspetto e sezioni ----------
+// La stessa lista si guarda in due modi, a scelta, e la scelta resta su ogni dispositivo:
+//  "elenco":       righe compatte, una sola azione per riga, le quattro sezioni nella barra in basso;
+//  "raccoglitore": griglia di immagini grandi, le sezioni come pulsanti in alto, il carrello in una barra.
+// Le sezioni seguono il giro di una carta: la vorrei (Wishlist) -> la cerco -> nel carrello -> trovata.
+const SEZIONI = {wish:"Wishlist", cerco:"La cerco", carr:"Carrello", trov:"Trovate"};
+const ASPETTI = {elenco:"Elenco", raccoglitore:"Raccoglitore"};
+let aspetto = "elenco", sezione = "wish";
+try {
+  if (ASPETTI[localStorage.getItem("lista-spesa-aspetto")]) aspetto = localStorage.getItem("lista-spesa-aspetto");
+  if (SEZIONI[localStorage.getItem("lista-spesa-sezione")]) sezione = localStorage.getItem("lista-spesa-sezione");
+} catch(e){}
+function scegliAspetto(a){
+  if (!ASPETTI[a]) return;
+  aspetto = a; try { localStorage.setItem("lista-spesa-aspetto", a); } catch(e){}
+  render();
+}
+function scegliSezione(s){
+  if (!SEZIONI[s]) return;
+  sezione = s; try { localStorage.setItem("lista-spesa-sezione", s); } catch(e){}
+  window.scrollTo(0, 0); render();
+}
+const IC = {
+  lista: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>',
+  griglia: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="4" y="4" width="6.5" height="8" rx="1.2"/><rect x="13.5" y="4" width="6.5" height="8" rx="1.2"/><rect x="4" y="14.5" width="6.5" height="5.5" rx="1.2"/><rect x="13.5" y="14.5" width="6.5" height="5.5" rx="1.2"/></svg>',
+  seg: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"/></svg>',
+  carr: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h2l2.4 11h10.2L20 8H6.2"/><circle cx="9" cy="19.5" r="1.3"/><circle cx="17" cy="19.5" r="1.3"/></svg>',
+  ok: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+};
+
+// ---------- quali carte in quale sezione ----------
+// La cerco: segnate, e ne manca ancora almeno una copia (quelle gia' nel carrello non mancano piu').
+const daCercare = c => cercata(c) && mancanti(c) > 0;
+function carteDi(sez){
+  if (sez === "wish") return carte.filter(c => passaFiltri(c) && !(F.nascondi && completa(c)));
+  if (sez === "cerco") return carte.filter(c => daCercare(c) && passaFiltri(c));
+  if (sez === "carr") return carte.filter(c => nelCarrello(c.chiave) && cercaNome(c));
+  return carte.filter(c => trovateDi(c.chiave) && cercaNome(c));
+}
+const perNome = (a,b) => a.nome.localeCompare(b.nome);
+// la stampa da mostrare per una carta fuori dalla vista per set: la piu' economica fra quelle che i filtri lasciano vedere
+function piuEconomica(c){
+  const vis = stampeDi(c).length ? stampeDi(c) : c.stampe;
+  return vis.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur)[0] || vis[0] || null;
+}
+// la stampa che hai segnato nel carrello o fra le trovate, se l'hai indicata
+function stampaDaVoce(c, v){
+  const s = v && v.set ? c.stampe.find(x => x.set === v.set && String(x.numero) === String(v.numero) && x.lingua === (v.lingua || "en")) : null;
+  return s || piuEconomica(c);
+}
+function stampaSezione(c){
+  if (sezione === "carr") return stampaDaVoce(c, (carrello[c.chiave] || [])[0]);
+  if (sezione === "trov") { const ts = trovate[c.chiave] || []; return stampaDaVoce(c, ts[ts.length - 1]); }
+  return piuEconomica(c);
+}
+const prezzoStampa = s => !s ? null : s.eur != null ? s.eur : s.eur_foil;
+const sommaVoci = vs => vs.reduce((t,x) => t + (Number(x.prezzo) || 0), 0);
+
+// ---------- gruppi: per set, per colore, per mazzo ----------
+// Nella vista per set una carta compare in ogni set in cui e' stata stampata: e' la vista per
+// cercare nei raccoglitori del negozio, ordinati per set.
 const nomeSet = s => F.estesi ? s.set_nome : s.set.toUpperCase();
 // le stampe della stessa carta nello stesso set (e lingua): la normale per prima, poi le varianti
 function varianti(c, s){
   return c.stampe.filter(x => x.set === s.set && x.lingua === s.lingua)
     .sort((a,b) => (varDi(a) ? 1 : 0) - (varDi(b) ? 1 : 0) || perNumero(a,b));
 }
-const etichetta = s => `#${s.numero} · ${varDi(s) || "normale"} · ${eur(s.eur)}`;
-function immagine(s, c){
-  const src = piccola(s);
-  if (src) return `<button class="img-btn" data-stampe="${c.chiave}" aria-label="Tutte le stampe di ${c.nome.replace(/"/g,"&quot;")}"><img class="img" src="${src}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"></button>`;
-  return `<div class="segnap"><span class="mono">${(s && s.set || "?").toUpperCase()}</span><span class="mono">${s && s.numero || ""}</span><span>senza immagine</span></div>`;
-}
-function copieHtml(c){
-  const n = trovateDi(c.chiave), k = nelCarrello(c.chiave);
-  return `<span class="copie"><b>${n}</b>/${c.copie} ${c.copie === 1 ? "copia" : "copie"}${k ? ` · <span class="nelc">${k} nel carrello</span>` : ""}</span>`;
-}
-function bottone(c){
-  const fatta = completa(c);
-  const cerco = fatta ? "" : `<button class="btn piccolo ${cercata(c) ? "cerco-on" : "sec"}" data-cerco="${c.chiave}" aria-pressed="${cercata(c)}">${cercata(c) ? "✓ la cerco" : "La cerco"}</button>`;
-  return `${cerco}<button class="btn ${fatta ? "ok" : ""}" data-trova="${c.chiave}">${fatta ? "✓ trovata" : "Trovata"}</button>`;
-}
-const badgeMazzi = c => c.mazzi.map(m => `<span class="badge mazzo">${m}</span>`).join("");
-// una riga nella vista per set: la stampa normale, con un menu per le altre versioni dello stesso set
-function rigaStampa(c, vs, id){
-  const s = vs.find(x => x.id === id) || vs[0];
-  const it = c.stampe.some(x => x.lingua === "it" && x.set === s.set);
-  const menu = vs.length > 1 ? `<select class="var" aria-label="Altre versioni in questo set">${vs.map(x =>
-    `<option value="${x.id}" ${x.id === s.id ? "selected" : ""}>${etichetta(x)}</option>`).join("")}</select>` : "";
-  return `<div class="riga ${completa(c) ? "fatta" : ""} ${cercata(c) ? "cercata" : ""} ${nelCarrello(c.chiave) ? "in-carrello" : ""}" data-chiave="${c.chiave}" data-stampa="${s.id}">
-    ${immagine(s, c)}
-    <div class="testo">
-      <div class="nome apri-stampe" data-stampe="${c.chiave}">${c.nome}</div>
-      <div class="dett"><span class="mono num">#${s.numero}</span>
-        ${varDi(s) ? `<span class="badge var">${varDi(s)}</span>` : ""}
-        <span class="prezzo">${eur(s.eur)}${s.eur_foil ? ` <small>foil ${eur(s.eur_foil)}</small>` : ""}</span>
-        ${s.lingua === "it" ? `<span class="badge it">IT</span>` : it ? `<span class="badge it">anche IT</span>` : ""}
-        ${s.rarita ? `<span class="badge">${s.rarita[0].toUpperCase()}</span>` : ""}</div>
-      ${menu ? `<div class="dett">${menu}<span class="set">${vs.length} versioni</span></div>` : ""}
-      <div class="dett">${badgeMazzi(c)}</div>
-    </div>
-    <div class="azione">${bottone(c)}${copieHtml(c)}</div>
-  </div>`;
-}
-// una riga nelle viste per colore e per mazzo: la carta, con i set in cui cercarla
-function rigaCarta(c){
-  const vis = stampeDi(c).length ? stampeDi(c) : c.stampe;
-  const s = vis.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur)[0] || vis[0];
-  const perSet = new Map();       // per ogni set, la stampa meno cara (a parità, la normale)
-  for (const x of vis) {
-    const g = perSet.get(x.set);
-    if (!g || (x.eur != null && (g.eur == null || x.eur < g.eur))) perSet.set(x.set, x);
-  }
-  const sets = [...perSet.values()].sort((a,b) => (a.eur ?? 1e9) - (b.eur ?? 1e9) || (b.uscita||"").localeCompare(a.uscita||""));
-  const chip = x => `<span class="badge cat-${catDi(x)}" title="${CAT[catDi(x)]}">${nomeSet(x)} #${x.numero}${x.eur != null ? ` · ${eur(x.eur)}` : ""}</span>`;
-  const max = F.estesi ? 6 : 10;
-  return `<div class="riga ${completa(c) ? "fatta" : ""} ${cercata(c) ? "cercata" : ""} ${nelCarrello(c.chiave) ? "in-carrello" : ""}" data-chiave="${c.chiave}" data-stampa="${s ? s.id : ""}">
-    ${immagine(s, c)}
-    <div class="testo">
-      <div class="nome apri-stampe" data-stampe="${c.chiave}">${c.nome}</div>
-      <div class="dett"><span class="prezzo">da ${eur(prezzoMin(c))}</span>
-        ${s ? `<span class="set">più economica: ${nomeSet(s)} #${s.numero}${varDi(s) ? ` (${varDi(s)})` : ""}</span>` : ""}
-        ${c.problema ? `<span class="set">${c.problema}</span>` : ""}
-        ${c.stampe.some(x => x.lingua === "it") ? `<span class="badge it">IT</span>` : ""}</div>
-      <div class="setchips">${sets.slice(0, max).map(chip).join("")}${sets.length > max ? `<span class="badge">+${sets.length - max} set</span>` : ""}</div>
-      <div class="dett">${badgeMazzi(c)}</div>
-    </div>
-    <div class="azione">${bottone(c)}${copieHtml(c)}</div>
-  </div>`;
-}
-function gruppo(id, nome, sotto, quante, righe, swatch){
-  const aperto = aperti.has(id);
-  return `<details class="gruppo" data-gruppo="${id}" ${aperto ? "open" : ""}>
-    <summary>${swatch ? `<span class="swatch" style="background:var(${swatch})"></span>` : ""}
-      <div class="titolo"><div class="nome">${nome}</div>${sotto ? `<div class="sotto">${sotto}</div>` : ""}</div>
-      <span class="conta">${quante}</span><span class="freccia">›</span></summary>
-    ${righe}
-  </details>`;
-}
-const aperti = new Set();
+const aperti = new Set(), chiusi = new Set();
+// nella Wishlist i set sono tanti e partono chiusi; in La cerco le carte sono poche e tutto parte aperto
+const perSetChiusi = id => id.startsWith("set-") && sezione === "wish";
+const aperto = id => perSetChiusi(id) ? aperti.has(id) : !chiusi.has(id);
 const nCarte = n => `${n} ${n === 1 ? "carta" : "carte"}`;
-function render(){
-  const visibili = carte.filter(passa);
-  const lista = document.getElementById("lista");
-  let html = "";
+function gruppi(lista){
+  const out = [];
   if (F.vista === "set") {
     const perSet = new Map();
-    for (const c of visibili) {
+    for (const c of lista) {
       const visti = new Set();
       for (const s of stampeDi(c)) {
         if (visti.has(s.set)) continue;
         visti.add(s.set);
-        if (!perSet.has(s.set)) perSet.set(s.set, {set:s.set, nome:s.set_nome, uscita:s.uscita, categoria:catDi(s), righe:[], chiavi:new Set()});
-        const g = perSet.get(s.set); g.righe.push([c, varianti(c, s)]); g.chiavi.add(c.chiave);
+        if (!perSet.has(s.set)) perSet.set(s.set, {set:s.set, nome:s.set_nome, uscita:s.uscita, categoria:catDi(s), voci:[]});
+        perSet.get(s.set).voci.push({c, s: varianti(c, s)[0]});
       }
     }
     for (const cat of ORDINE_CAT) {
-      const gruppi = [...perSet.values()].filter(g => g.categoria === cat)
-        .sort((a,b) => b.chiavi.size - a.chiavi.size || (b.uscita||"").localeCompare(a.uscita||""));
-      if (!gruppi.length) continue;
-      const carteCat = new Set(gruppi.flatMap(g => [...g.chiavi])).size;
-      html += `<h2 class="sezione">${CAT[cat]} <small>${gruppi.length} set · ${nCarte(carteCat)}</small><div class="spiega">${CAT_SOTTO[cat]}</div></h2>`;
-      for (const g of gruppi) {
-        g.righe.sort((a,b) => perNumero(a[1][0], b[1][0]));
-        html += gruppo("set-" + g.set, g.nome, `<span class="mono">${g.set.toUpperCase()}</span> · ${(g.uscita||"").slice(0,4)}`,
-                       nCarte(g.chiavi.size), g.righe.map(([c,vs]) => rigaStampa(c, vs, vs[0].id)).join(""), null);
+      const gs = [...perSet.values()].filter(g => g.categoria === cat)
+        .sort((a,b) => b.voci.length - a.voci.length || (b.uscita||"").localeCompare(a.uscita||""));
+      if (!gs.length) continue;
+      const n = new Set(gs.flatMap(g => g.voci.map(v => v.c.chiave))).size;
+      out.push({intestazione: `<h2 class="sezione">${CAT[cat]} <small>${gs.length} set · ${nCarte(n)}</small><div class="spiega">${CAT_SOTTO[cat]}</div></h2>`});
+      for (const g of gs) {
+        g.voci.sort((a,b) => perNumero(a.s, b.s));
+        out.push({id: "set-" + g.set, nome: g.nome, sotto: `<span class="mono">${esc(g.set.toUpperCase())}</span> · ${(g.uscita||"").slice(0,4)}`, voci: g.voci});
       }
     }
+    // le carte senza stampe visibili (per esempio non ancora scaricate da Scryfall) non sparirebbero in silenzio
+    const senza = lista.filter(c => !stampeDi(c).length);
+    if (senza.length) out.push({id: "set-?", nome: "Senza stampe da mostrare", sotto: "non ancora scaricate, o escluse dai filtri", voci: senza.sort(perNome).map(c => ({c, s: null}))});
   } else if (F.vista === "colore") {
-    for (const gnome of GRUPPI) {
-      const cs = visibili.filter(c => c.gruppo === gnome).sort((a,b) => a.nome.localeCompare(b.nome));
-      if (!cs.length) continue;
-      html += gruppo("col-" + gnome, gnome, "", nCarte(cs.length), cs.map(rigaCarta).join(""), COL[gnome]);
+    for (const gn of GRUPPI) {
+      const cs = lista.filter(c => c.gruppo === gn).sort(perNome);
+      if (cs.length) out.push({id: "col-" + gn, nome: gn, swatch: COL[gn], voci: cs.map(c => ({c, s: piuEconomica(c)}))});
     }
   } else {
     for (const m of mazziTutti) {
-      const cs = visibili.filter(c => c.mazzi.includes(m)).sort((a,b) => a.nome.localeCompare(b.nome));
+      const cs = lista.filter(c => c.mazzi.includes(m)).sort(perNome);
       if (!cs.length) continue;
       const tot = cs.reduce((t,c) => t + (prezzoMin(c) || 0), 0);
-      html += gruppo("mazzo-" + m, m, `alla stampa più economica ${eur(tot)}`, nCarte(cs.length), cs.map(rigaCarta).join(""), null);
+      out.push({id: "mazzo-" + m, nome: m, sotto: `${eur(tot)} alla stampa più economica`, voci: cs.map(c => ({c, s: piuEconomica(c)}))});
     }
   }
-  if (!datiPronti) { lista.innerHTML = `<div class="vuoto">${statoCarico}</div>`; riassunto(); return; }
-  lista.innerHTML = html || `<div class="vuoto">${!carte.length ? "La wishlist è vuota: apri il Menu e importa l'export di Archidekt, oppure aggiungi una carta a mano." : F.solocerco && !carte.some(cercata) ? "Non stai ancora cercando nessuna carta: togli «Solo quelle che cerco» e tocca «La cerco» sulle carte che vuoi." : "Niente da mostrare con questi filtri."}</div>`;
-  lista.innerHTML += `<div class="nota">Prezzi e stampe da Scryfall${generato ? ` del ${generato}` : ""}${db && db.modo === "online" ? ` · dati sincronizzati (${esc(db.utente || "")})` : " · dati salvati in questo browser"}</div>`;
-  riassunto();
+  return out;
 }
-function riassunto(){
-  const daTrovare = carte.filter(c => !completa(c));
-  const copieMancanti = carte.reduce((t,c) => t + Math.max(0, c.copie - trovateDi(c.chiave)), 0);
-  const copieTrovate = carte.reduce((t,c) => t + trovateDi(c.chiave), 0);
-  const stima = carte.reduce((t,c) => t + (c.prezzo_min || 0) * Math.max(0, c.copie - trovateDi(c.chiave)), 0);
-  const speso = Object.values(trovate).flat().reduce((t,x) => t + (Number(x.prezzo) || 0), 0);
-  document.getElementById("riass").innerHTML =
-    `<span class="chip">da trovare <b>${copieMancanti}</b> ${copieMancanti === 1 ? "copia" : "copie"} · ${daTrovare.length} carte</span>` +
-    `<span class="chip ok">trovate <b>${copieTrovate}</b>${speso ? ` · spesi ${eur(speso)}` : ""}</span>` +
-    `<span class="chip">restano <b>${eur(stima)}</b> alla stampa più economica</span>`;
-  const cs = carte.filter(cercata);
-  const copieC = cs.reduce((t,c) => t + mancanti(c), 0);
-  const totC = cs.reduce((t,c) => t + (c.prezzo_min || 0) * mancanti(c), 0);
-  document.getElementById("barra-cerco").innerHTML =
-    `<span class="chip cerco">sto cercando <b>${cs.length}</b> ${cs.length === 1 ? "carta" : "carte"}${copieC !== cs.length ? ` (${copieC} ${copieC === 1 ? "copia" : "copie"} ancora da trovare)` : ""} · <b>${eur(totC)}</b></span>` +
-    `<button class="btn piccolo ${F.solocerco ? "cerco-on" : "sec"}" id="solo-cerco" aria-pressed="${F.solocerco}">${F.solocerco ? "✓ " : ""}Solo quelle che cerco</button>` +
-    `<button class="btn piccolo sec" id="esporta" ${cs.some(c => mancanti(c) > 0) ? "" : "disabled"}>Copia per i siti</button>` +
-    `<button class="btn piccolo ${nCarrello() ? "carrello" : "sec"}" id="apri-carrello">🛒 Carrello${nCarrello() ? ` · ${nCarrello()} · ${eur(totCarrello())}` : ""}</button>`;
+function gruppoHtml(g, corpo){
+  return `<details class="gruppo" data-gruppo="${esc(g.id)}" ${aperto(g.id) ? "open" : ""}>
+    <summary>${g.swatch ? `<span class="swatch" style="background:var(${g.swatch})"></span>` : ""}
+      <div class="titolo"><div class="nome">${esc(g.nome)}</div>${g.sotto ? `<div class="sotto">${g.sotto}</div>` : ""}</div>
+      <span class="conta">${g.voci.length}</span><span class="freccia" aria-hidden="true">›</span></summary>
+    ${corpo}
+  </details>`;
 }
 
-// ---------- foglio "carrello" ----------
+// ---------- una carta: l'immagine, con il nome sotto se l'immagine non c'e' ----------
+function miniatura(c, s, big){
+  const x = s && s.immagine ? s : c.stampe.find(y => y.immagine);
+  const src = x ? (big ? grande(x) : piccola(x)) : null;
+  return `<span class="mini" style="background:var(${COL[c.gruppo] || "--C"})"><span class="mini-n">${esc(c.nome)}</span>${src ? `<img src="${src}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ""}</span>`;
+}
+const brevi = c => esc(c.mazzi.join(", "));
+function copieTesto(c){
+  const n = trovateDi(c.chiave), k = nelCarrello(c.chiave);
+  if (c.copie === 1 && !n && !k) return "";
+  return `${n}/${c.copie} ${c.copie === 1 ? "copia" : "copie"}${k ? ` · <span class="nelc">${k} nel carrello</span>` : ""}`;
+}
+function sottoRiga(c, s, sez){
+  const p = [];
+  if (sez === "trov") {
+    const ts = trovate[c.chiave] || [];
+    p.push(`${ts.length}/${c.copie} · pagata <b>${eur(sommaVoci(ts))}</b>`);
+    const neg = [...new Set(ts.map(x => x.negozio).filter(Boolean))];
+    if (neg.length) p.push(esc(neg.join(", ")));
+    p.push(esc([...new Set(ts.map(x => x.mazzo))].join(", ")));
+    return p.join(" · ");
+  }
+  if (F.vista === "set" && s) {
+    p.push(`<span class="mono">#${esc(s.numero)}</span>${varDi(s) ? ` ${esc(varDi(s))}` : ""} <b>${s.eur != null ? eur(s.eur) : s.eur_foil != null ? "foil " + eur(s.eur_foil) : "—"}</b>${s.lingua === "it" ? " · IT" : ""}`);
+  } else {
+    p.push(`da <b>${eur(prezzoMin(c))}</b>${s ? ` <span class="set">(${esc(nomeSet(s))} #${esc(s.numero)})</span>` : ""}`);
+  }
+  const cp = copieTesto(c); if (cp) p.push(cp);
+  if (c.problema) p.push(esc(c.problema));
+  p.push(brevi(c));
+  return p.join(" · ");
+}
+// Elenco: una riga, una sola azione a destra, e cambia con la sezione
+function riga(c, s, sez){
+  const fatta = sez === "wish" && completa(c);
+  let az = "";
+  if (sez === "wish") az = fatta ? `<span class="spunta" title="Trovata">${IC.ok}</span>`
+    : `<button class="segna" data-cerco="${c.chiave}" aria-pressed="${cercata(c)}" aria-label="${cercata(c) ? `La cerchi: tocca per smettere (${esc(c.nome)})` : `La cerco (${esc(c.nome)})`}">${IC.seg}</button>`;
+  else if (sez === "cerco") az = `<button class="btn" data-trova="${c.chiave}">Trovata</button>`;
+  else if (sez === "trov") az = `<button class="btn sec piccolo" data-trova="${c.chiave}">Modifica</button>`;
+  const id = s ? s.id : "";
+  return `<div class="r ${fatta ? "fatta" : ""}" data-chiave="${c.chiave}" data-stampa="${id}">
+    <button class="r-img" data-stampe="${c.chiave}" data-img="${id}" aria-label="Apri ${esc(c.nome)}">${miniatura(c, s, false)}</button>
+    <div class="r-tx" data-stampe="${c.chiave}" data-img="${id}"><div class="r-nm">${esc(c.nome)}</div><div class="r-sb">${sottoRiga(c, s, sez)}</div></div>
+    ${az}</div>`;
+}
+// Raccoglitore: una casella con l'immagine; le azioni stanno nella scheda che si apre toccandola
+function casella(c, s, sez){
+  const st = completa(c) ? "trov" : nelCarrello(c.chiave) ? "carr" : cercata(c) ? "cerco" : "";
+  const marca = st ? `<span class="marca ${st}" title="${st === "trov" ? "Trovata" : st === "carr" ? "Nel carrello" : "La cerchi"}">${st === "trov" ? IC.ok : st === "carr" ? IC.carr : IC.seg}</span>` : "";
+  const prezzo = sez === "carr" ? sommaVoci(carrello[c.chiave] || []) : sez === "trov" ? sommaVoci(trovate[c.chiave] || [])
+    : F.vista === "set" ? prezzoStampa(s) : prezzoMin(c);
+  const copie = c.copie > 1 ? `<span class="copie-b">${trovateDi(c.chiave)}/${c.copie}</span>` : "";
+  return `<button class="cas ${st === "trov" && sez !== "trov" ? "fatta" : ""}" data-stampe="${c.chiave}" data-img="${s ? s.id : ""}" aria-label="${esc(c.nome)}">
+    <span class="cas-im">${miniatura(c, s, true)}<span class="pz">${prezzo == null ? "—" : eur(prezzo).replace(" €", "")}</span>${marca}${copie}</span>
+    <span class="cas-n">${esc(c.nome)}</span>${F.vista === "set" && s && (sez === "wish" || sez === "cerco") ? `<span class="cas-s">#${esc(s.numero)}${varDi(s) ? ` · ${esc(varDi(s))}` : ""}</span>` : ""}</button>`;
+}
+
+// ---------- la pagina ----------
+const VUOTO = {
+  cerco: "<b>Non stai cercando nessuna carta</b>Nella Wishlist tocca il segnalibro, o «La cerco» nella scheda della carta, su quelle che vuoi cercare in negozio o online.",
+  carr: "<b>Il carrello è vuoto</b>Quando trovi una carta tocca «Trovata», scrivi prezzo e negozio e scegli «Nel carrello»: resta da parte finché non decidi di comprarla.",
+  trov: "<b>Ancora nessuna carta trovata</b>",
+};
+let rimandato = false;
+function render(){
+  document.body.dataset.aspetto = aspetto;
+  testata();
+  const lista = document.getElementById("lista");
+  // mentre scrivi un prezzo nel carrello la pagina non si ridisegna: lo fa quando esci dal campo
+  const a = document.activeElement;
+  if (a && a.matches && a.matches("#lista [data-prezzo]")) { rimandato = true; return; }
+  rimandato = false;
+  if (!datiPronti) { lista.innerHTML = `<div class="vuoto">${statoCarico}</div>`; return; }
+  const cs = carteDi(sezione);
+  let html = "";
+  if (sezione === "carr" && aspetto === "elenco" && nCarrello()) {
+    html = `<div class="carr-pagina">${corpoCarrello(false)}</div>
+      <div class="piede"><div class="t">Totale<br><b class="mono">${eur(totCarrello())}</b></div><button class="btn" data-compra>Comprate tutte</button></div>`;
+  } else if (!cs.length) {
+    const qualcuna = sezione === "wish" ? carte.length : sezione === "cerco" ? carte.some(daCercare)
+      : sezione === "carr" ? nCarrello() : carte.some(c => trovateDi(c.chiave));
+    html = `<div class="vuoto">${sezione === "wish" && !carte.length ? "<b>La wishlist è vuota</b>Apri il Menu e importa l'export di Archidekt, oppure aggiungi una carta a mano."
+      : qualcuna ? "<b>Niente da mostrare</b>Nessuna carta con questi filtri o con questa ricerca." : VUOTO[sezione]}</div>`;
+  } else {
+    const gs = sezione === "wish" || sezione === "cerco" ? gruppi(cs) : [{voci: cs.sort(perNome).map(c => ({c, s: stampaSezione(c)}))}];
+    for (const g of gs) {
+      if (g.intestazione) { html += g.intestazione; continue; }
+      const corpo = aspetto === "elenco"
+        ? `<div class="righe">${g.voci.map(v => riga(v.c, v.s, sezione)).join("")}</div>`
+        : `<div class="cas-griglia">${g.voci.map(v => casella(v.c, v.s, sezione)).join("")}</div>`;
+      html += g.id ? gruppoHtml(g, corpo) : corpo;
+    }
+  }
+  html += `<div class="nota">Prezzi e stampe da Scryfall${generato ? ` del ${generato}` : ""}${db && db.modo === "online" ? ` · dati sincronizzati (${esc(db.utente || "")})` : " · dati salvati in questo browser"}</div>`;
+  lista.innerHTML = html;
+}
+// intestazione, riepilogo, sezioni e barre: tutto quello che sta intorno alla lista
+function testata(){
+  const el = id => document.getElementById(id);
+  const pronto = datiPronti && !!db;
+  el("titolo").textContent = aspetto === "elenco" && pronto ? SEZIONI[sezione] : "Lista della spesa";
+  const altro = aspetto === "elenco" ? "raccoglitore" : "elenco";
+  el("aspetto").innerHTML = aspetto === "elenco" ? IC.griglia : IC.lista;
+  el("aspetto").setAttribute("aria-label", `Passa all'aspetto ${ASPETTI[altro]}`);
+  el("aspetto").title = `Passa all'aspetto ${ASPETTI[altro]}`;
+  const nf = filtriAttivi();
+  el("apri-filtri").innerHTML = `Filtri${nf ? ` · ${nf}` : ""}`;
+  // conti
+  const cs = carte.filter(daCercare);
+  const nVoci = nCarrello();
+  const conta = {wish: carte.filter(c => !completa(c)).length, cerco: cs.length, carr: nVoci, trov: carte.filter(c => trovateDi(c.chiave)).length};
+  // le sezioni: pulsanti in alto nel Raccoglitore, barra in basso nell'Elenco
+  el("sezioni").hidden = aspetto !== "raccoglitore" || !pronto;
+  el("sezioni").innerHTML = Object.entries(SEZIONI).map(([k, n]) =>
+    `<button data-sezione="${k}" aria-pressed="${sezione === k}">${n} <b>${conta[k]}</b></button>`).join("");
+  el("nav").hidden = aspetto !== "elenco" || !pronto;
+  const icone = {wish: IC.lista, cerco: IC.seg, carr: IC.carr, trov: IC.ok};
+  el("nav").innerHTML = Object.entries(SEZIONI).map(([k, n]) =>
+    `<button data-sezione="${k}" ${sezione === k ? 'aria-current="page"' : ""}><span class="pill">${icone[k]}</span>${n}${(k === "cerco" || k === "carr") && conta[k] ? `<span class="num">${conta[k]}</span>` : ""}</button>`).join("");
+  el("viste").hidden = !pronto || !(sezione === "wish" || sezione === "cerco");
+  el("viste").innerHTML = [["set","Per set"],["colore","Per colore"],["mazzo","Per mazzo"]].map(([v, t]) =>
+    `<button data-vista="${v}" aria-pressed="${F.vista === v}">${t}</button>`).join("");
+  const barra = el("barra-carrello");
+  barra.hidden = aspetto !== "raccoglitore" || !pronto || !nVoci;
+  barra.innerHTML = `${IC.carr}<span class="t">Carrello · ${nCarte(nVoci)}</span><b class="mono">${eur(totCarrello())}</b>`;
+  // l'avviso in basso si tiene sopra le barre: quella delle sezioni, quella del carrello, il totale del carrello
+  const piede = aspetto === "elenco" && sezione === "carr" && nVoci && pronto;
+  document.documentElement.style.setProperty("--basso", (piede ? 154 : !el("nav").hidden || !barra.hidden ? 84 : 20) + "px");
+  // riepilogo della sezione
+  let r = "";
+  if (pronto) {
+    if (sezione === "wish") {
+      const copie = carte.reduce((t,c) => t + Math.max(0, c.copie - trovateDi(c.chiave)), 0);
+      const stima = carte.reduce((t,c) => t + (c.prezzo_min || 0) * Math.max(0, c.copie - trovateDi(c.chiave)), 0);
+      r = `<span><b>${copie}</b> ${copie === 1 ? "copia" : "copie"} da trovare · <b>${eur(stima)}</b> alla stampa più economica</span>`;
+    } else if (sezione === "cerco") {
+      const copie = cs.reduce((t,c) => t + mancanti(c), 0);
+      const tot = cs.reduce((t,c) => t + (c.prezzo_min || 0) * mancanti(c), 0);
+      r = `<span><b>${cs.length}</b> ${cs.length === 1 ? "carta" : "carte"}${copie !== cs.length ? ` (${copie} copie)` : ""} · <b>${eur(tot)}</b></span>
+        <button class="btn sec piccolo" id="esporta" ${cs.length ? "" : "disabled"}>Copia per i siti</button>`;
+    } else if (sezione === "carr") {
+      r = `<span><b>${nVoci}</b> ${nVoci === 1 ? "copia" : "copie"} non ancora comprate · <b>${eur(totCarrello())}</b></span>
+        ${aspetto === "raccoglitore" && nVoci ? `<button class="btn sec piccolo" id="apri-carrello">Prezzi e conti</button>` : ""}`;
+    } else {
+      const copie = carte.reduce((t,c) => t + trovateDi(c.chiave), 0);
+      const speso = Object.values(trovate).flat().reduce((t,x) => t + (Number(x.prezzo) || 0), 0);
+      r = `<span><b>${copie}</b> ${copie === 1 ? "copia trovata" : "copie trovate"}${speso ? ` · spesi <b>${eur(speso)}</b>` : ""}</span>`;
+    }
+  }
+  el("riepilogo").innerHTML = r;
+  el("riepilogo").hidden = !r;
+  misuraAlto();
+}
+// i titoli dei gruppi restano attaccati sotto l'intestazione mentre scorri: serve sapere quanto e' alta
+function misuraAlto(){
+  const h = document.querySelector("header"); if (!h) return;
+  document.documentElement.style.setProperty("--alto", Math.round(h.getBoundingClientRect().height + (parseFloat(getComputedStyle(h).top) || 0)) + "px");
+}
+addEventListener("resize", misuraAlto);
+
+// ---------- carrello: nel foglio (Raccoglitore) o nella sua sezione (Elenco) ----------
 const vociCarrello = () => Object.entries(carrello).filter(([ch]) => perChiave[ch])
   .flatMap(([ch, vs]) => vs.map((v, i) => ({ch, i, v, c: perChiave[ch]})))
   .sort((a,b) => (a.v.negozio || "").localeCompare(b.v.negozio || "") || a.c.nome.localeCompare(b.c.nome));
@@ -304,55 +442,55 @@ function deltaHtml(p, rif){
   if (Math.abs(d) < 0.005) return `<span class="delta">= riferimento</span>`;
   return `<span class="delta ${d > 0 ? "su" : "giu"}">${d > 0 ? "+" : "−"}${eur(Math.abs(d))}</span>`;
 }
+const TESTO_CARRELLO_VUOTO = "Il carrello è vuoto. Quando trovi una carta, tocca «Trovata», scrivi prezzo e negozio e scegli «Nel carrello»: la carta resta da parte finché non decidi di comprarla.";
+// le voci del carrello con prezzo modificabile, i conti e i pulsanti
+function corpoCarrello(nelFoglio){
+  const vs = vociCarrello();
+  const negozi = [...new Set(vs.map(x => x.v.negozio || ""))];
+  const tot = vs.reduce((t,x) => t + (prezzoDi(x.v) || 0), 0);
+  const conRif = vs.filter(x => prezzoDi(x.v) != null && riferimento(x.c, x.v).p != null);
+  const totRif = conRif.reduce((t,x) => t + riferimento(x.c, x.v).p, 0);
+  const totPagCmp = conRif.reduce((t,x) => t + prezzoDi(x.v), 0);
+  const senzaPrezzo = vs.filter(x => prezzoDi(x.v) == null).length;
+  let righe = "";
+  for (const n of negozi) {
+    const qui = vs.filter(x => (x.v.negozio || "") === n);
+    if (negozi.length > 1) righe += `<h3>${esc(n || "Negozio non indicato")} <small class="sd">${qui.length} · ${eur(qui.reduce((t,x) => t + (prezzoDi(x.v) || 0), 0))}</small></h3>`;
+    righe += qui.map(x => {
+      const r = riferimento(x.c, x.v);
+      return `<div class="voce-c">
+        <button class="vi" data-stampe="${x.ch}" data-img="${(stampaDaVoce(x.c, x.v) || {}).id || ""}" aria-label="Apri ${esc(x.c.nome)}">${miniatura(x.c, stampaDaVoce(x.c, x.v), false)}</button>
+        <div class="vn">${esc(x.c.nome)}</div>
+        <div class="vp"><input type="number" min="0" step="0.05" inputmode="decimal" value="${prezzoDi(x.v) ?? ""}" placeholder="€" data-prezzo="${x.ch}|${x.i}" aria-label="Prezzo di ${esc(x.c.nome)}">
+          <button class="btn sec piccolo" data-toglic="${x.ch}|${x.i}" aria-label="Togli ${esc(x.c.nome)} dal carrello">Togli</button></div>
+        <div class="vd">per ${esc(x.v.mazzo)}${negozi.length === 1 && x.v.negozio ? ` · ${esc(x.v.negozio)}` : ""}${x.v.set ? ` · ${descStampa(x.v)}` : ""}<br>
+          riferimento ${eur(r.p)} <span class="sd">(${r.cosa})</span> ${deltaHtml(prezzoDi(x.v), r.p)}</div>
+      </div>`;
+    }).join("");
+  }
+  return `${righe}
+    <div class="totali">
+      <span class="t">Totale del carrello</span><b class="mono">${eur(tot)}</b>
+      <span class="t">Le stesse carte al prezzo di riferimento</span><span class="mono">${eur(totRif)}</span>
+      <span class="t">Differenza</span><span>${deltaHtml(totPagCmp, totRif) || "—"}</span>
+      ${senzaPrezzo ? `<span class="t" style="grid-column:1 / -1">${senzaPrezzo} ${senzaPrezzo === 1 ? "carta senza prezzo, esclusa" : "carte senza prezzo, escluse"} dai conti</span>` : ""}
+    </div>
+    <div class="scelte">
+      ${nelFoglio ? `<button class="btn" data-compra>Comprate tutte: segnale come trovate</button>` : ""}
+      <button class="btn sec" data-svuota>Svuota il carrello</button>
+      ${nelFoglio ? `<button class="btn sec" data-chiudi>Chiudi</button>` : ""}
+    </div>`;
+}
 function apriCarrello(){
   const wrap = document.getElementById("foglio-wrap");
-  let conferma = null;               // "compra" | "svuota": il secondo tocco conferma
   const disegna = () => {
     const vs = vociCarrello();
-    if (!vs.length) {
-      wrap.innerHTML = `<div class="velo" data-chiudi></div><div class="foglio" role="dialog" aria-label="Carrello">
-        <div class="testa"><div><h2>Carrello</h2></div><button class="btn sec" data-chiudi aria-label="Chiudi">✕</button></div>
-        <div class="sub">Il carrello è vuoto. Quando trovi una carta, tocca «Trovata», scrivi prezzo e negozio e scegli «Nel carrello»: la carta resta da parte finché non decidi di comprarla.</div></div>`;
-      return;
-    }
-    const negozi = [...new Set(vs.map(x => x.v.negozio || ""))];
-    const tot = vs.reduce((t,x) => t + (prezzoDi(x.v) || 0), 0);
-    const conRif = vs.filter(x => prezzoDi(x.v) != null && riferimento(x.c, x.v).p != null);
-    const totRif = conRif.reduce((t,x) => t + riferimento(x.c, x.v).p, 0);
-    const totPagCmp = conRif.reduce((t,x) => t + prezzoDi(x.v), 0);
-    const senzaPrezzo = vs.filter(x => prezzoDi(x.v) == null).length;
-    let righe = "";
-    for (const n of negozi) {
-      const qui = vs.filter(x => (x.v.negozio || "") === n);
-      if (negozi.length > 1) righe += `<h3>${esc(n || "Negozio non indicato")} <small class="sd">${qui.length} · ${eur(qui.reduce((t,x) => t + (prezzoDi(x.v) || 0), 0))}</small></h3>`;
-      righe += qui.map(x => {
-        const r = riferimento(x.c, x.v);
-        return `<div class="voce-c">
-          <div class="vn">${esc(x.c.nome)}</div>
-          <div class="vp"><input type="number" min="0" step="0.05" inputmode="decimal" value="${prezzoDi(x.v) ?? ""}" placeholder="€" data-prezzo="${x.ch}|${x.i}" aria-label="Prezzo di ${esc(x.c.nome)}">
-            <button class="btn sec piccolo" data-toglic="${x.ch}|${x.i}" aria-label="Togli ${esc(x.c.nome)} dal carrello">Togli</button></div>
-          <div class="vd">per ${esc(x.v.mazzo)}${negozi.length === 1 && x.v.negozio ? ` · ${esc(x.v.negozio)}` : ""}${x.v.set ? ` · ${descStampa(x.v)}` : ""}<br>
-            riferimento ${eur(r.p)} <span class="sd">(${r.cosa})</span> ${deltaHtml(prezzoDi(x.v), r.p)}</div>
-        </div>`;
-      }).join("");
-    }
     wrap.innerHTML = `<div class="velo" data-chiudi></div>
       <div class="foglio" role="dialog" aria-label="Carrello">
         <div class="testa"><div><h2>Carrello</h2>
-          <div class="sub">${vs.length} ${vs.length === 1 ? "carta trovata" : "carte trovate"}, non ancora comprate${negozi.length > 1 ? ` · ${negozi.length} negozi` : negozi[0] ? ` · ${esc(negozi[0])}` : ""}. Puoi correggere il prezzo o togliere quelle che non vuoi tenere.</div></div>
+          <div class="sub">${!vs.length ? TESTO_CARRELLO_VUOTO : `${vs.length} ${vs.length === 1 ? "carta trovata" : "carte trovate"}, non ancora comprate. Puoi correggere il prezzo o togliere quelle che non vuoi tenere.`}</div></div>
           <button class="btn sec" data-chiudi aria-label="Chiudi">✕</button></div>
-        ${righe}
-        <div class="totali">
-          <span class="t">Totale del carrello</span><b class="mono">${eur(tot)}</b>
-          <span class="t">Le stesse carte al prezzo di riferimento</span><span class="mono">${eur(totRif)}</span>
-          <span class="t">Differenza</span><span>${deltaHtml(totPagCmp, totRif) || "—"}</span>
-          ${senzaPrezzo ? `<span class="t" style="grid-column:1 / -1">${senzaPrezzo} ${senzaPrezzo === 1 ? "carta senza prezzo, esclusa" : "carte senza prezzo, escluse"} dai conti</span>` : ""}
-        </div>
-        <div class="scelte">
-          <button class="btn" data-compra>${conferma === "compra" ? `Conferma: segna comprate ${vs.length} ${vs.length === 1 ? "carta" : "carte"}` : "Comprate tutte: segnale come trovate"}</button>
-          <button class="btn sec" data-svuota>${conferma === "svuota" ? "Conferma: svuota il carrello" : "Svuota il carrello"}</button>
-          <button class="btn sec" data-chiudi>Chiudi</button>
-        </div>
+        ${vs.length ? corpoCarrello(true) : ""}
       </div>`;
   };
   const ridisegna = () => { if (wrap.hidden) { ridisegnaCarrello = null; return; }
@@ -360,39 +498,72 @@ function apriCarrello(){
   disegna();
   wrap.hidden = false;
   ridisegnaCarrello = () => { if (!document.activeElement || !document.activeElement.matches("[data-prezzo]")) ridisegna(); };
-  wrap.onchange = async ev => {
-    const inp = ev.target.closest("[data-prezzo]"); if (!inp) return;
-    const [ch, i] = inp.dataset.prezzo.split("|"); const v = (carrello[ch] || [])[Number(i)]; if (!v) return;
-    v.prezzo = inp.value === "" ? null : Number(inp.value);
-    render(); ridisegna(); await salvaCarrello(ch);
-  };
-  wrap.onclick = async ev => {
-    const t = ev.target.closest("[data-chiudi],[data-toglic],[data-compra],[data-svuota]");
+  wrap.onchange = ev => { const inp = ev.target.closest("[data-prezzo]"); if (inp) cambiaPrezzo(inp); };
+  wrap.onclick = ev => {
+    const t = ev.target.closest("[data-chiudi],[data-toglic],[data-compra],[data-svuota],[data-stampe]");
     if (!t) return;
     if (t.hasAttribute("data-chiudi")) { wrap.hidden = true; ridisegnaCarrello = null; return; }
-    if (t.hasAttribute("data-toglic")) {
-      const [ch, i] = t.dataset.toglic.split("|");
-      const nome = perChiave[ch] ? perChiave[ch].nome : ch;
-      carrello[ch] = (carrello[ch] || []).filter((_, k) => k !== Number(i));
-      if (!carrello[ch].length) delete carrello[ch];
-      conferma = null; render(); ridisegna(); await salvaCarrello(ch); toast(`${nome}: tolta dal carrello`); return;
-    }
-    if (t.hasAttribute("data-svuota")) {
-      if (conferma !== "svuota") { conferma = "svuota"; ridisegna(); return; }
-      const chiavi = Object.keys(carrello); carrello = {};
-      conferma = null; render(); ridisegna(); for (const ch of chiavi) await salvaCarrello(ch, []); toast("Carrello svuotato"); return;
-    }
-    if (t.hasAttribute("data-compra")) {
-      if (conferma !== "compra") { conferma = "compra"; ridisegna(); return; }
-      const vs = vociCarrello(); const chiavi = [...new Set(vs.map(x => x.ch))];
-      // il piano si fissa prima di scrivere: ogni carta passa dal carrello alle trovate con i suoi dati
-      const piano = chiavi.map(ch => ({ch, lista: [...(trovate[ch] || []), ...carrello[ch].map(v => ({...v}))]}));
-      for (const p of piano) { trovate[p.ch] = p.lista; delete carrello[p.ch]; }
-      conferma = null; render(); ridisegna();
-      for (const p of piano) { await salvaTrovate(p.ch, p.lista); await salvaCarrello(p.ch, []); }
-      toast(`Segnate comprate ${vs.length} ${vs.length === 1 ? "carta" : "carte"}`, 2400); return;
-    }
+    if (t.hasAttribute("data-stampe")) { ridisegnaCarrello = null; apriStampe(t.dataset.stampe, t.dataset.img); return; }
+    azioneCarrello(t);
   };
+}
+const aggiornaCarrello = () => { render(); if (ridisegnaCarrello) ridisegnaCarrello(); };
+async function cambiaPrezzo(inp){
+  const [ch, i] = inp.dataset.prezzo.split("|"); const v = (carrello[ch] || [])[Number(i)]; if (!v) return;
+  v.prezzo = inp.value === "" ? null : Number(inp.value);
+  inCoda(() => salvaCarrello(ch));
+  setTimeout(aggiornaCarrello, 0);
+}
+// Le scritture dei pulsanti con «Annulla» vanno in fila: annullare aspetta che l'azione sia salvata,
+// cosi' il database finisce sempre nello stato giusto.
+let fila = Promise.resolve();
+const inCoda = f => (fila = fila.then(f, f));
+const copiaVoci = vs => (vs || []).map(v => ({...v}));
+async function azioneCarrello(t){
+  if (t.hasAttribute("data-toglic")) {
+    const [ch, i] = t.dataset.toglic.split("|");
+    const nome = perChiave[ch] ? perChiave[ch].nome : ch;
+    const prima = copiaVoci(carrello[ch]);
+    const dopo = prima.filter((_, k) => k !== Number(i));
+    if (dopo.length) carrello[ch] = dopo; else delete carrello[ch];
+    aggiornaCarrello(); inCoda(() => salvaCarrello(ch, dopo));
+    toast(`${nome}: tolta dal carrello`, 5000, () => inCoda(async () => { carrello[ch] = prima; aggiornaCarrello(); await salvaCarrello(ch, prima); }));
+    return;
+  }
+  if (t.hasAttribute("data-svuota")) {
+    const prima = Object.fromEntries(Object.entries(carrello).map(([ch, vs]) => [ch, copiaVoci(vs)]));
+    const chiavi = Object.keys(prima); if (!chiavi.length) return;
+    carrello = {}; aggiornaCarrello();
+    inCoda(async () => { for (const ch of chiavi) await salvaCarrello(ch, []); });
+    toast("Carrello svuotato", 6000, () => inCoda(async () => { Object.assign(carrello, prima); aggiornaCarrello(); for (const ch of chiavi) await salvaCarrello(ch, prima[ch]); }));
+    return;
+  }
+  if (t.hasAttribute("data-compra")) compraTutte();
+}
+// «Comprate tutte»: ogni carta passa dal carrello alle trovate con i suoi dati (prezzo, negozio, stampa)
+function compraTutte(){
+  const vs = vociCarrello(); if (!vs.length) return;
+  const chiavi = [...new Set(vs.map(x => x.ch))];
+  // il piano si fissa prima di scrivere; si tiene anche lo stato di prima, per «Annulla»
+  const prima = chiavi.map(ch => ({ch, trov: copiaVoci(trovate[ch]), carr: copiaVoci(carrello[ch]), cerc: cercate[ch] ? {...cercate[ch]} : null}));
+  const piano = chiavi.map(ch => ({ch, lista: [...copiaVoci(trovate[ch]), ...copiaVoci(carrello[ch])]}));
+  for (const p of piano) { trovate[p.ch] = p.lista; delete carrello[p.ch]; }
+  // il foglio del carrello, ormai vuoto, si chiude: resta l'avviso con «Annulla»
+  if (ridisegnaCarrello) { ridisegnaCarrello = null; document.getElementById("foglio-wrap").hidden = true; }
+  aggiornaCarrello();
+  inCoda(async () => { for (const p of piano) { await salvaTrovate(p.ch, p.lista); await salvaCarrello(p.ch, []); } });
+  toast(`Segnate comprate ${vs.length} ${vs.length === 1 ? "carta" : "carte"}`, 7000, () => inCoda(async () => {
+    for (const p of prima) {
+      if (p.trov.length) trovate[p.ch] = p.trov; else delete trovate[p.ch];
+      carrello[p.ch] = p.carr;
+      if (p.cerc) cercate[p.ch] = p.cerc;
+    }
+    aggiornaCarrello();
+    for (const p of prima) {
+      if (p.cerc) await salvaCercata(p.ch);
+      await salvaTrovate(p.ch, p.trov); await salvaCarrello(p.ch, p.carr);
+    }
+  }));
 }
 
 // ---------- export per Cardmarket e CardTrader ----------
@@ -472,28 +643,31 @@ function schedaCarta(c, idImg){
 // ---------- foglio "tutte le stampe" ----------
 let ordineStampe = "set";
 try { ordineStampe = localStorage.getItem("lista-spesa-ordine-stampe") || "set"; } catch(e){}
-function tessera(c, s){
+function tessera(c, s, scelta){
   const src = piccola(s);
   const img = src ? `<img src="${src}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`
-                  : `<div class="segnap"><span class="mono">${s.set.toUpperCase()}</span><span>senza immagine</span></div>`;
-  return `<button class="stampa" data-scegli="${s.id}" title="Segna trovata questa stampa">
+                  : `<div class="segnap"><span class="mono">${esc(s.set.toUpperCase())}</span><span>senza immagine</span></div>`;
+  return `<button class="stampa" data-scegli="${s.id}" aria-pressed="${s.id === scelta}" title="Mostra questa stampa">
     ${img}
-    <span class="sn">${s.set_nome || s.set.toUpperCase()}</span>
-    <span class="sd"><span class="mono">${s.set.toUpperCase()} #${s.numero}</span>${s.lingua === "it" ? ` · <span class="badge it">IT</span>` : ""}</span>
-    <span class="sd">${varDi(s) || "normale"}${s.uscita ? ` · ${s.uscita.slice(0,4)}` : ""}</span>
+    <span class="sn">${esc(s.set_nome || s.set.toUpperCase())}</span>
+    <span class="sd"><span class="mono">${esc(s.set.toUpperCase())} #${esc(s.numero)}</span>${s.lingua === "it" ? ` · <span class="badge it">IT</span>` : ""}</span>
+    <span class="sd">${esc(varDi(s) || "normale")}${s.uscita ? ` · ${s.uscita.slice(0,4)}` : ""}</span>
     <span class="sp">${eur(s.eur)}${s.eur_foil && s.eur == null ? ` <small class="sd">foil ${eur(s.eur_foil)}</small>` : ""}</span>
   </button>`;
 }
-function apriStampe(chiave){
-  const c = perChiave[chiave];
+// La scheda di una carta: immagine grande, testo, tutte le stampe e le azioni.
+// Toccare una stampa la mostra grande; «Trovata» ricorda la stampa scelta (prezzo, set, numero).
+function apriStampe(chiave, idImg){
+  const c = perChiave[chiave]; if (!c) return;
   const wrap = document.getElementById("foglio-wrap");
   const tutte = c.stampe.slice();
   const nSet = new Set(tutte.map(s => s.set)).size;
   const nIt = tutte.filter(s => s.lingua === "it").length;
+  let idGrande = idImg && tutte.some(s => s.id === idImg) ? idImg : null, zoom = false;
   const corpo = () => {
     if (ordineStampe === "prezzo") {
       const ord = tutte.slice().sort((a,b) => (a.eur ?? 1e9) - (b.eur ?? 1e9) || (b.uscita||"").localeCompare(a.uscita||""));
-      return `<div class="griglia">${ord.map(s => tessera(c, s)).join("")}</div>`;
+      return `<div class="griglia">${ord.map(s => tessera(c, s, idGrande)).join("")}</div>`;
     }
     let html = "";
     for (const cat of ORDINE_CAT) {
@@ -502,43 +676,57 @@ function apriStampe(chiave){
           || (a.lingua === b.lingua ? 0 : a.lingua === "en" ? -1 : 1)
           || (varDi(a) ? 1 : 0) - (varDi(b) ? 1 : 0) || perNumero(a,b));
       if (!qui.length) continue;
-      html += `<h3>${CAT[cat]} <small class="sd">${new Set(qui.map(s => s.set)).size} set</small></h3><div class="griglia">${qui.map(s => tessera(c, s)).join("")}</div>`;
+      html += `<h3>${CAT[cat]} <small class="sd">${new Set(qui.map(s => s.set)).size} set</small></h3><div class="griglia">${qui.map(s => tessera(c, s, idGrande)).join("")}</div>`;
     }
     return html;
   };
-  let idGrande = null, zoom = false;
+  const azioni = () => {
+    const fatta = completa(c), s = tutte.find(x => x.id === idGrande);
+    const stato = copieTesto(c);
+    return `${s ? `<div class="scelta-c">Stampa scelta: ${descStampa(s)} · <b>${s.eur != null ? eur(s.eur) : s.eur_foil != null ? "foil " + eur(s.eur_foil) : "—"}</b></div>` : ""}
+      <div class="azioni-c">
+        ${fatta ? "" : `<button class="btn ${cercata(c) ? "cerco-on" : "sec"}" data-cerco-f aria-pressed="${cercata(c)}">${cercata(c) ? "✓ La cerco" : "La cerco"}</button>`}
+        <button class="btn ${fatta ? "ok" : ""}" data-trova-f>${fatta ? "✓ Trovata: modifica" : "Trovata"}</button>
+      </div>${stato ? `<div class="stato-c">${stato} · per ${esc(c.mazzi.join(", "))}</div>` : `<div class="stato-c">per ${esc(c.mazzi.join(", "))}</div>`}`;
+  };
   const disegna = () => {
     wrap.innerHTML = `<div class="velo" data-chiudi></div>
-      <div class="foglio" role="dialog" aria-label="Tutte le stampe">
-        <div class="testa"><div><h2>${c.nome}</h2>
+      <div class="foglio" role="dialog" aria-label="${esc(c.nome)}">
+        <div class="testa"><div><h2>${esc(c.nome)}</h2>
           <div class="sub">${tutte.length} stampe in ${nSet} set${nIt ? ` · ${nIt} in italiano` : ""} · da ${eur(c.prezzo_min)}</div></div>
           <button class="btn sec" data-chiudi aria-label="Chiudi">✕</button></div>
+        ${azioni()}
         ${schedaCarta(c, idGrande)}
-        <div class="sub">Tocca una stampa per segnarla trovata.</div>
+        <div class="sub">Tocca una stampa per vederla grande: «Trovata» userà quella.</div>
         <div class="ordina"><button data-ordina="set" aria-pressed="${ordineStampe === "set"}">Per scaffale e set</button><button data-ordina="prezzo" aria-pressed="${ordineStampe === "prezzo"}">Per prezzo</button></div>
         ${corpo()}
       </div>`;
+    if (zoom) { const im = wrap.querySelector("[data-zoom]"); if (im) im.classList.add("zoom"); }
   };
+  const ridisegna = (y) => { const f = wrap.querySelector(".foglio"); const prima = f ? f.scrollTop : 0; disegna(); const g = wrap.querySelector(".foglio"); if (g) g.scrollTop = y == null ? prima : y; };
   disegna();
   wrap.hidden = false;
+  wrap.onchange = null;
   wrap.onclick = ev => {
-    const t = ev.target.closest("[data-chiudi],[data-ordina],[data-scegli],[data-zoom],[data-lingua]");
+    const t = ev.target.closest("[data-chiudi],[data-ordina],[data-scegli],[data-zoom],[data-lingua],[data-cerco-f],[data-trova-f]");
     if (!t) return;
     if (t.hasAttribute("data-chiudi")) { wrap.hidden = true; return; }
     if (t.hasAttribute("data-zoom")) { zoom = !zoom; t.classList.toggle("zoom", zoom); t.title = zoom ? "Tocca per rimpicciolire" : "Tocca per ingrandire"; return; }
+    if (t.hasAttribute("data-cerco-f")) { toggleCerco(chiave); ridisegna(); return; }
+    if (t.hasAttribute("data-trova-f")) { apriFoglio(chiave, idGrande); return; }
     if (t.hasAttribute("data-lingua")) {
       linguaTesto = t.dataset.lingua;
       try { localStorage.setItem("lista-spesa-lingua-testo", linguaTesto); } catch(e){}
-      const f = wrap.querySelector(".foglio"); const y = f ? f.scrollTop : 0;
-      disegna(); const g = wrap.querySelector(".foglio"); if (g) { g.scrollTop = y; if (zoom) { const im = g.querySelector("[data-zoom]"); if (im) im.classList.add("zoom"); } } return;
+      ridisegna(); return;
     }
     if (t.hasAttribute("data-ordina")) {
       ordineStampe = t.dataset.ordina;
       try { localStorage.setItem("lista-spesa-ordine-stampe", ordineStampe); } catch(e){}
-      const f = wrap.querySelector(".foglio"); const y = f ? f.scrollTop : 0;
-      disegna(); const g = wrap.querySelector(".foglio"); if (g) g.scrollTop = y; return;
+      ridisegna(); return;
     }
-    apriFoglio(chiave, t.dataset.scegli);
+    // una stampa: diventa quella scelta, e si torna su a vederla grande
+    idGrande = t.dataset.scegli; ridisegna();
+    const g = wrap.querySelector(".foglio"); if (g) g.scrollTo({top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
   };
 }
 
@@ -614,8 +802,15 @@ function apriFoglio(chiave, idStampa){
     toast(quali.length === 1 ? `Comprata per ${quali[0]}` : `Comprate ${quali.length} copie`);
   };
 }
-let toastT = null;
-function toast(msg, ms){ const el = document.getElementById("toast"); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, ms || 1800); }
+// avviso in basso; con "annulla" mostra il pulsante Annulla, che chiama quella funzione
+let toastT = null, toastAnnulla = null;
+function toast(msg, ms, annulla){
+  const el = document.getElementById("toast");
+  toastAnnulla = annulla || null;
+  el.innerHTML = `<span>${esc(msg)}</span>${annulla ? `<button type="button" data-annulla>Annulla</button>` : ""}`;
+  el.hidden = false; clearTimeout(toastT);
+  toastT = setTimeout(() => { el.hidden = true; toastAnnulla = null; }, ms || (annulla ? 5000 : 1800));
+}
 
 // ---------- wishlist: mazzi importati da Archidekt + carte aggiunte a mano ----------
 // "wishlist": un documento per mazzo, {carte: [{nome, copie}], importato, file}
@@ -856,6 +1051,10 @@ function apriMenu(){
       <div class="foglio menu" role="dialog" aria-label="Menu">
         <div class="testa"><div><h2>Menu</h2></div><button class="btn sec" data-chiudi aria-label="Chiudi">✕</button></div>
 
+        <h3>Aspetto</h3>
+        <div class="sub">Come vedere la lista su questo dispositivo. <b>Elenco</b>: righe compatte e le sezioni nella barra in basso. <b>Raccoglitore</b>: le carte in griglia con le immagini grandi. Si cambia anche col pulsante accanto a Menu.</div>
+        <div class="ordina">${Object.entries(ASPETTI).map(([k, n]) => `<button data-aspetto="${k}" aria-pressed="${aspetto === k}">${n}</button>`).join("")}</div>
+
         <h3>Dove sono i dati</h3>
         <div class="sub">${!db ? "Non sei ancora collegato." : online ? `Collegato come <b>${esc(db.utente)}</b>: telefono e PC vedono gli stessi dati.` : Store.configurato ? "" : "I dati sono salvati solo in questo browser. Per averli uguali su telefono e PC configura Supabase, come spiega la guida."}</div>
         ${online ? `<div class="due"><button class="btn sec piccolo" data-password>Scegli o cambia la password</button><button class="btn sec piccolo" data-esci>Esci</button></div>` : ""}
@@ -910,9 +1109,10 @@ function apriMenu(){
     e.target.value = ""; ridisegna();
   };
   wrap.onclick = async e => {
-    const t = e.target.closest("[data-chiudi],[data-esci],[data-password],[data-toglimazzo],[data-aggiungi],[data-togliagg],[data-aggiorna],[data-esporta]");
+    const t = e.target.closest("[data-chiudi],[data-esci],[data-password],[data-toglimazzo],[data-aggiungi],[data-togliagg],[data-aggiorna],[data-esporta],[data-aspetto]");
     if (!t) return;
     if (t.hasAttribute("data-chiudi")) { wrap.hidden = true; ridisegnaMenu = null; return; }
+    if (t.hasAttribute("data-aspetto")) { scegliAspetto(t.dataset.aspetto); ridisegna(); return; }
     try {
       if (t.hasAttribute("data-esci")) return db.esci();
       if (t.hasAttribute("data-password")) { ridisegnaMenu = null; apriPassword(false); return; }
@@ -935,35 +1135,59 @@ function apriMenu(){
 document.getElementById("apri-menu").addEventListener("click", apriMenu);
 
 // ---------- eventi ----------
+const oggi = () => new Date().toISOString().slice(0,10);
+function impostaCerco(ch, si){
+  if (si) cercate[ch] = cercate[ch] || {quando: oggi()}; else delete cercate[ch];
+  render(); inCoda(() => salvaCercata(ch));
+}
+function toggleCerco(ch){
+  const nome = perChiave[ch] ? perChiave[ch].nome : ch;
+  const ora = !cercate[ch];
+  impostaCerco(ch, ora);
+  toast(ora ? `${nome}: la cerchi` : `${nome}: non la cerchi più`, 4000, () => impostaCerco(ch, !ora));
+}
 const lista = document.getElementById("lista");
 lista.addEventListener("click", ev => {
   const cb = ev.target.closest("[data-cerco]");
-  if (cb) {
-    const ch = cb.dataset.cerco;
-    if (cercate[ch]) delete cercate[ch]; else cercate[ch] = {quando: new Date().toISOString().slice(0,10)};
-    render(); salvaCercata(ch);
-    return;
-  }
+  if (cb) { toggleCerco(cb.dataset.cerco); return; }
   const b = ev.target.closest("[data-trova]");
-  if (b) { const riga = b.closest(".riga"); apriFoglio(b.dataset.trova, riga && riga.dataset.stampa); return; }
+  if (b) { const r = b.closest("[data-stampa]"); apriFoglio(b.dataset.trova, r && r.dataset.stampa); return; }
   const st = ev.target.closest("[data-stampe]");
-  if (st) { apriStampe(st.dataset.stampe); return; }
+  if (st) { apriStampe(st.dataset.stampe, st.dataset.img); return; }
+  const t = ev.target.closest("[data-toglic],[data-compra],[data-svuota]");
+  if (t) azioneCarrello(t);
 });
-// il menu delle versioni: cambia immagine, numero e prezzo della riga, e la stampa che "Trovata" ricorda
-lista.addEventListener("change", ev => {
-  const sel = ev.target.closest("select.var"); if (!sel) return;
-  const riga = sel.closest(".riga"); const c = perChiave[riga.dataset.chiave];
-  const s = c.stampe.find(x => x.id === sel.value); if (!s) return;
-  riga.outerHTML = rigaStampa(c, varianti(c, s), s.id);
-});
+lista.addEventListener("change", ev => { const inp = ev.target.closest("[data-prezzo]"); if (inp) cambiaPrezzo(inp); });
+lista.addEventListener("focusout", () => setTimeout(() => { if (rimandato) render(); }, 0));
 lista.addEventListener("toggle", ev => {
   const d = ev.target; if (d.tagName !== "DETAILS") return;
-  if (d.open) aperti.add(d.dataset.gruppo); else aperti.delete(d.dataset.gruppo);
+  const id = d.dataset.gruppo;
+  if (perSetChiusi(id)) { if (d.open) aperti.add(id); else aperti.delete(id); }
+  else { if (d.open) chiusi.delete(id); else chiusi.add(id); }
 }, true);
-for (const v of ["set","colore","mazzo"]) document.getElementById("v-" + v).addEventListener("click", () => {
-  F.vista = v; for (const w of ["set","colore","mazzo"]) document.getElementById("v-" + w).setAttribute("aria-pressed", String(w === v));
-  salvaFiltri(); render();
+// sezioni (in alto nel Raccoglitore, in basso nell'Elenco), viste, riepilogo, barra del carrello
+for (const id of ["sezioni", "nav"]) document.getElementById(id).addEventListener("click", e => {
+  const b = e.target.closest("[data-sezione]"); if (b) scegliSezione(b.dataset.sezione);
 });
+document.getElementById("viste").addEventListener("click", e => {
+  const b = e.target.closest("[data-vista]"); if (!b) return;
+  F.vista = b.dataset.vista; salvaFiltri(); render();
+});
+document.getElementById("riepilogo").addEventListener("click", e => {
+  if (e.target.closest("#esporta")) apriEsporta();
+  if (e.target.closest("#apri-carrello")) apriCarrello();
+});
+document.getElementById("barra-carrello").addEventListener("click", apriCarrello);
+document.getElementById("aspetto").addEventListener("click", () => {
+  const a = aspetto === "elenco" ? "raccoglitore" : "elenco";
+  scegliAspetto(a); toast(`Aspetto: ${ASPETTI[a]}`);
+});
+document.getElementById("toast").addEventListener("click", e => {
+  if (!e.target.closest("[data-annulla]")) return;
+  const f = toastAnnulla; toastAnnulla = null; document.getElementById("toast").hidden = true;
+  if (f) f();
+});
+// filtri
 const sel = document.getElementById("mazzo");
 function riempiMazzi(){
   const v = F.mazzo;
@@ -971,11 +1195,11 @@ function riempiMazzi(){
   sel.value = mazziTutti.includes(v) ? v : "";
 }
 const selCat = document.getElementById("categoria");
+if (!["set","colore","mazzo"].includes(F.vista)) F.vista = "set";
 document.getElementById("cerca").value = F.cerca; sel.value = F.mazzo; document.getElementById("maxprezzo").value = F.maxprezzo;
 selCat.value = ORDINE_CAT.includes(F.categoria) ? F.categoria : "";
 document.getElementById("soloit").checked = F.soloit; document.getElementById("nascondi").checked = F.nascondi;
 document.getElementById("estesi").checked = F.estesi !== false;
-document.getElementById("v-" + (["set","colore","mazzo"].includes(F.vista) ? F.vista : "set")).click();
 document.getElementById("cerca").addEventListener("input", e => { F.cerca = e.target.value; salvaFiltri(); render(); });
 sel.addEventListener("change", e => { F.mazzo = e.target.value; salvaFiltri(); render(); });
 selCat.addEventListener("change", e => { F.categoria = e.target.value; salvaFiltri(); render(); });
@@ -985,13 +1209,20 @@ document.getElementById("nascondi").addEventListener("change", e => { F.nascondi
 document.getElementById("estesi").addEventListener("change", e => { F.estesi = e.target.checked; salvaFiltri(); render(); });
 document.getElementById("apri-filtri").addEventListener("click", e => {
   const x = document.getElementById("filtri-extra"); x.hidden = !x.hidden; e.currentTarget.setAttribute("aria-expanded", String(!x.hidden));
-});
-document.getElementById("barra-cerco").addEventListener("click", e => {
-  if (e.target.closest("#solo-cerco")) { F.solocerco = !F.solocerco; salvaFiltri(); render(); return; }
-  if (e.target.closest("#esporta")) apriEsporta();
-  if (e.target.closest("#apri-carrello")) apriCarrello();
+  misuraAlto();
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") document.getElementById("foglio-wrap").hidden = true; });
+// Il tasto Indietro del telefono chiude il foglio aperto, invece di uscire dall'app.
+(function(){
+  const wrap = document.getElementById("foglio-wrap");
+  let segnato = false, daIndietro = false;
+  new MutationObserver(() => {
+    if (!wrap.hidden && !segnato) { segnato = true; history.pushState({foglio: true}, ""); }
+    else if (wrap.hidden && segnato) { segnato = false; if (!daIndietro) history.back(); }
+    daIndietro = false;
+  }).observe(wrap, {attributes: true, attributeFilter: ["hidden"]});
+  addEventListener("popstate", () => { if (segnato && !wrap.hidden) { daIndietro = true; wrap.hidden = true; } });
+})();
 render();
 collegaDb();
 document.addEventListener("visibilitychange", () => { if (!document.hidden && db && db.ricarica) db.ricarica(); });
