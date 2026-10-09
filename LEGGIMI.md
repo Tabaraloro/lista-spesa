@@ -13,8 +13,10 @@ Le carte stanno in quattro sezioni, che seguono il giro di una carta: **Wishlist
 
 ## Due aspetti, a scelta
 
-- **Elenco**: righe compatte, una sola azione per riga (il segnalibro per «La cerco», «Trovata», …) e le quattro sezioni nella barra in basso.
-- **Raccoglitore**: le carte in griglia con le immagini grandi, come le pagine di un raccoglitore; le sezioni sono pulsanti in alto e il carrello è una barra in basso. Tocchi una carta e nella scheda trovi «La cerco» e «Trovata».
+Cambia solo come si vedono le carte: intestazione, barra delle sezioni in basso, carrello e menu sono uguali.
+
+- **Elenco**: righe compatte, con una sola azione per riga (il segnalibro per «La cerco», «Trovata», …).
+- **Raccoglitore**: le carte in griglia con le immagini grandi, come le pagine di un raccoglitore. Tocchi una carta e nella scheda trovi «La cerco», «Trovata» e «Togli dalla wishlist».
 
 Si cambia con il pulsante accanto a **Menu**, oppure da **Menu → Aspetto**. La scelta resta su quel dispositivo: puoi usare il Raccoglitore sul telefono e l'Elenco sul PC.
 
