@@ -451,6 +451,22 @@ function corpoCarrello(){
   const totPagCmp = conRif.reduce((t,x) => t + prezzoDi(x.v), 0);
   const senzaPrezzo = vs.filter(x => prezzoDi(x.v) == null).length;
   const senzaTrend = vs.filter(x => riferimento(x.c, x.v).p == null).length;
+  // CardTrader: le offerte vere per le stampe scelte (arrivano dopo; il carrello si ridisegna da solo)
+  const stampeCt = vs.map(x => stampaDaVoce(x.c, x.v)).filter(Boolean);
+  chiediCt(stampeCt, () => { if (sezione === "carr") render(); });
+  const ctVoce = x => ctDi(stampaDaVoce(x.c, x.v));
+  const conCt = vs.filter(x => { const p = ctVoce(x); return p && p.min != null; });
+  const totCt = conCt.reduce((t,x) => t + ctVoce(x).min, 0);
+  const conZero = vs.filter(x => { const p = ctVoce(x); return p && p.zero != null; });
+  const totZero = conZero.reduce((t,x) => t + ctVoce(x).zero, 0);
+  const ctAttivo = db && ctStato !== "nonpronto";
+  const ctRiga = x => {
+    if (!ctAttivo) return "";
+    const p = ctVoce(x);
+    if (p === undefined) return ` · CardTrader <span class="sd">${ctStato === "errore" ? "non risponde" : "…"}</span>`;
+    if (!p || p.min == null) return ` · CardTrader <span class="sd">${p && p.blueprint ? "nessuna offerta" : "non trovata"}</span>`;
+    return ` · CardTrader ${eur(p.min)}${p.cond_min ? ` <span class="sd">${ctCond(p.cond_min)}</span>` : ""}${p.zero != null ? ` · Zero ${eur(p.zero)}` : ""}`;
+  };
   let righe = "";
   for (const n of negozi) {
     const qui = vs.filter(x => (x.v.negozio || "") === n);
@@ -463,7 +479,7 @@ function corpoCarrello(){
         <div class="vp"><input type="number" min="0" step="0.05" inputmode="decimal" value="${prezzoDi(x.v) ?? ""}" placeholder="€" data-prezzo="${x.ch}|${x.i}" aria-label="Prezzo di ${esc(x.c.nome)}">
           <button class="btn sec piccolo" data-toglic="${x.ch}|${x.i}" aria-label="Togli ${esc(x.c.nome)} dal carrello">Togli</button></div>
         <div class="vd">per ${esc(x.v.mazzo)}${negozi.length === 1 && x.v.negozio ? ` · ${esc(x.v.negozio)}` : ""}${x.v.set ? ` · ${descStampa(x.v)}` : ""}<br>
-          Cardmarket ${eur(r.p)} <span class="sd">(${r.cosa})</span>${x.c.prezzo_min != null && r.p != null && x.c.prezzo_min < r.p - 0.005 ? ` · più bassa ${eur(x.c.prezzo_min)}` : ""} ${deltaHtml(prezzoDi(x.v), r.p)}</div>
+          Cardmarket ${eur(r.p)} <span class="sd">(${r.cosa})</span>${x.c.prezzo_min != null && r.p != null && x.c.prezzo_min < r.p - 0.005 ? ` · più bassa ${eur(x.c.prezzo_min)}` : ""}${ctRiga(x)} ${deltaHtml(prezzoDi(x.v), r.p)}</div>
       </div>`;
     }).join("");
   }
@@ -472,6 +488,8 @@ function corpoCarrello(){
       <span class="t">Totale reale <small class="sd">i prezzi che hai scritto</small></span><b class="mono">${eur(tot)}</b>
       <span class="t">Totale Cardmarket <small class="sd">trend delle stampe scelte</small></span><span class="mono">${eur(totTrend)}</span>
       <span class="t">Totale più basso <small class="sd">trend delle stampe più economiche</small></span><span class="mono">${eur(totBasso)}</span>
+      ${ctAttivo ? `<span class="t">Totale CardTrader <small class="sd">offerte più basse delle stampe scelte${conCt.length < vs.length ? ` · ${conCt.length} su ${vs.length} carte` : ""}</small></span><span class="mono">${conCt.length ? eur(totCt) : ctStato === "errore" ? "—" : "…"}</span>
+      <span class="t">Totale CardTrader Zero <small class="sd">spedizione unica${conZero.length < vs.length ? ` · ${conZero.length} su ${vs.length} carte` : ""}</small></span><span class="mono">${conZero.length ? eur(totZero) : "—"}</span>` : ""}
       <span class="t">Differenza <small class="sd">reale − Cardmarket</small></span><span>${deltaHtml(totPagCmp, totRif) || "—"}</span>
       ${senzaPrezzo ? `<span class="t" style="grid-column:1 / -1">${senzaPrezzo} ${senzaPrezzo === 1 ? "carta senza prezzo reale, esclusa" : "carte senza prezzo reale, escluse"} dal totale reale e dalla differenza</span>` : ""}
       ${senzaTrend ? `<span class="t" style="grid-column:1 / -1">${senzaTrend} ${senzaTrend === 1 ? "carta senza prezzo Cardmarket" : "carte senza prezzo Cardmarket"} (Scryfall non l'ha ancora dato)</span>` : ""}
@@ -704,9 +722,45 @@ function apriStampe(chiave, idImg){
 
 // ---------- foglio "trovata" ----------
 const descStampa = s => `${s.set_nome || String(s.set||"").toUpperCase()} <span class="mono">${String(s.set||"").toUpperCase()} #${s.numero}</span>${s.variante ? ` · ${s.variante}` : ""}${s.lingua === "it" ? " · IT" : ""}`;
-// I prezzi Cardmarket che Scryfall ci passa (il "trend" di Cardmarket, aggiornato ogni giorno):
-// quello della stampa scelta e quello della stampa più economica fra tutte, con il link alla pagina Cardmarket.
-function prezziCardmarket(c, s){
+// ---------- prezzi CardTrader: offerte vere, attraverso la funzione su Supabase ----------
+// ct[id Scryfall] = {min, cond_min, zero, cond_zero, offerte, blueprint, quando} oppure null se CardTrader non conosce la stampa.
+// Restano in memoria nel browser per 12 ore; la funzione su Supabase ha la sua memoria, cosi' CardTrader si chiama poco.
+const CT_LS = "lista-spesa-ct", CT_VALIDO = 12 * 60 * 60 * 1000;
+let ct = {}, ctInCorso = new Set(), ctStato = "", ctErroreQuando = 0;   // ctStato: "" | "nonpronto" | "errore"
+try { const j = JSON.parse(localStorage.getItem(CT_LS) || "{}"); if (j && j.quando && Date.now() - j.quando < CT_VALIDO) ct = j.prezzi || {}; } catch(e){}
+const salvaCt = () => { try { localStorage.setItem(CT_LS, JSON.stringify({quando: Date.now(), prezzi: ct})); } catch(e){} };
+const ctCond = c => ({"Near Mint": "NM", "Mint": "M", "Slightly Played": "SP", "Moderately Played": "MP", "Played": "PL", "Poor": "PO"})[c] || c || "";
+// chiede i prezzi delle stampe che mancano; quando arrivano chiama `poi`
+function chiediCt(stampe, poi){
+  if (!db || !Store.cardtrader || ctStato === "nonpronto") return;
+  if (ctStato === "errore" && Date.now() - ctErroreQuando < 60000) return;   // dopo un errore si riprova dopo un minuto
+  const nuove = stampe.filter(s => s && s.id && !(s.id in ct) && !ctInCorso.has(s.id));
+  if (!nuove.length) return;
+  nuove.forEach(s => ctInCorso.add(s.id));
+  const corpo = nuove.map(s => ({id: s.id, set: s.set, set_nome: s.set_nome, foil: !!(s.eur == null && s.eur_foil != null)}));
+  Store.cardtrader(corpo).then(r => {
+    for (const s of nuove) ct[s.id] = (r.prezzi && r.prezzi[s.id]) || null;
+    ctStato = ""; salvaCt();
+  }).catch(err => {
+    ctStato = err.nonPronto ? "nonpronto" : "errore"; ctErroreQuando = Date.now();
+    if (!err.nonPronto) console.warn("CardTrader:", err.message);
+  }).finally(() => { nuove.forEach(s => ctInCorso.delete(s.id)); if (poi) poi(); });
+}
+const ctDi = s => s && s.id in ct ? ct[s.id] : undefined;      // undefined: non ancora chiesto
+const ctLink = p => p && p.blueprint ? `https://www.cardtrader.com/cards/${p.blueprint}` : null;
+// la riga "CardTrader" per una stampa: prezzo piu' basso e piu' basso fra i venditori Zero
+function righeCt(s, etichetta){
+  const p = ctDi(s);
+  if (ctStato === "nonpronto") return "";
+  if (p === undefined) return `<div class="cm-r"><span>${etichetta}</span><b class="sd">${ctStato === "errore" ? "non risponde" : "…"}</b></div>`;
+  if (!p || p.min == null) return `<div class="cm-r"><span>${etichetta}</span><b class="sd">${p && p.blueprint ? "nessuna offerta" : "non trovata"}</b></div>`;
+  return `<div class="cm-r"><span>${etichetta} · più bassa${p.cond_min ? ` <small class="sd">${ctCond(p.cond_min)}</small>` : ""}</span><b>${eur(p.min)}</b></div>` +
+    (p.zero != null ? `<div class="cm-r"><span>${etichetta} · Zero${p.cond_zero ? ` <small class="sd">${ctCond(p.cond_zero)}</small>` : ""} <small class="sd">spedizione unica</small></span><b>${eur(p.zero)}</b></div>` : "");
+}
+
+// I prezzi di mercato nel foglio «Trovata»: Cardmarket (il "trend" che passa Scryfall, aggiornato ogni giorno)
+// per la stampa scelta e per la più economica, e le offerte vere di CardTrader per le stesse stampe.
+function prezziMercato(c, s){
   const conPrezzo = c.stampe.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur);
   const eco = conPrezzo[0] || null;
   const link = (s && s.cm) || (eco && eco.cm) || `https://www.cardmarket.com/it/Magic/Products/Search?searchString=${encodeURIComponent(c.nome)}`;
@@ -714,8 +768,15 @@ function prezziCardmarket(c, s){
   if (s) righe.push(`<div class="cm-r"><span>Questa stampa${s.eur == null && s.eur_foil != null ? " (foil)" : ""}</span><b>${s.eur != null ? eur(s.eur) : s.eur_foil != null ? eur(s.eur_foil) : "—"}</b></div>`);
   if (eco && (!s || eco.id !== s.id)) righe.push(`<div class="cm-r"><span>La più economica · ${descStampa(eco)}</span><b>${eur(eco.eur)}</b></div>`);
   if (!righe.length) righe.push(`<div class="cm-r"><span>Prezzo non ancora scaricato da Scryfall</span><b>—</b></div>`);
+  let ctHtml = "";
+  if (db && ctStato !== "nonpronto") {
+    const quali = [s, eco && (!s || eco.id !== s.id) ? eco : null].filter(Boolean);
+    ctHtml = quali.map(x => righeCt(x, x === s ? "Questa stampa" : "La più economica")).join("");
+    const pLink = quali.map(ctDi).find(p => p && p.blueprint);
+    ctHtml = `<div class="sub" style="margin-top:8px">CardTrader, offerte di oggi</div>${ctHtml}${pLink ? `<a class="link" href="${esc(ctLink(pLink))}" target="_blank" rel="noopener">Vedi su CardTrader ↗</a>` : ""}`;
+  }
   return `<div class="cm"><div class="sub">Cardmarket, prezzo trend di oggi</div>${righe.join("")}
-    <a class="link" href="${esc(link)}" target="_blank" rel="noopener">Vedi le offerte su Cardmarket ↗</a></div>`;
+    <a class="link" href="${esc(link)}" target="_blank" rel="noopener">Vedi le offerte su Cardmarket ↗</a>${ctHtml}</div>`;
 }
 function apriFoglio(chiave, idStampa){
   const c = perChiave[chiave];
@@ -738,7 +799,7 @@ function apriFoglio(chiave, idStampa){
     <div class="foglio" role="dialog" aria-label="Segna come trovata">
       <h2>${c.nome}</h2>
       <div class="sub">${c.copie === 1 ? "Ne cerchi una" : `Ne cerchi ${c.copie}`} · ${c.mazzi.join(", ")}${s ? `<br>stampa: ${descStampa(s)}` : ""}</div>
-      ${prezziCardmarket(c, s)}
+      ${prezziMercato(c, s)}
       <div class="campi">
         <input id="f-negozio" placeholder="Negozio (facoltativo)" value="${ultimoNegozio.replace(/"/g,"&quot;")}" autocomplete="off">
         <input id="f-prezzo" placeholder="€ prezzo" type="number" min="0" step="0.05" inputmode="decimal" value="${s && s.eur != null ? s.eur : ""}">
@@ -753,6 +814,9 @@ function apriFoglio(chiave, idStampa){
         `<div><span>${t.mazzo}${t.negozio ? ` · ${t.negozio}` : ""}${t.prezzo != null && t.prezzo !== "" ? ` · ${eur(Number(t.prezzo))}` : ""}${t.set ? ` · ${descStampa(t)}` : ""}</span><button class="btn sec" data-togli="${i}">Rimuovi</button></div>`).join("")}</div>` : ""}
     </div>`;
   wrap.hidden = false;
+  // le offerte CardTrader arrivano dopo: si ridisegna solo il riquadro dei prezzi
+  { const eco = c.stampe.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur)[0] || null;
+    chiediCt([s, eco].filter(Boolean), () => { const q = wrap.querySelector(".cm"); if (q && !wrap.hidden) q.outerHTML = prezziMercato(c, s); }); }
   wrap.onclick = async (ev) => {
     const t = ev.target.closest("[data-chiudi],[data-segna],[data-togli],[data-modo],[data-toglic]");
     if (!t) return;
