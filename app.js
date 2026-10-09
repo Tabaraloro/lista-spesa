@@ -459,13 +459,15 @@ function corpoCarrello(){
   const totCt = conCt.reduce((t,x) => t + ctVoce(x).min, 0);
   const conZero = vs.filter(x => { const p = ctVoce(x); return p && p.zero != null; });
   const totZero = conZero.reduce((t,x) => t + ctVoce(x).zero, 0);
+  const conMedio = vs.filter(x => { const p = ctVoce(x); return p && p.medio != null; });
+  const totMedio = conMedio.reduce((t,x) => t + ctVoce(x).medio, 0);
   const ctAttivo = db && ctStato !== "nonpronto";
   const ctRiga = x => {
     if (!ctAttivo) return "";
     const p = ctVoce(x);
     if (p === undefined) return ` · CardTrader <span class="sd">${ctStato === "errore" ? "non risponde" : "…"}</span>`;
     if (!p || p.min == null) return ` · CardTrader <span class="sd">${p && p.blueprint ? "nessuna offerta" : "non trovata"}</span>`;
-    return ` · CardTrader ${eur(p.min)}${p.cond_min ? ` <span class="sd">${ctCond(p.cond_min)}</span>` : ""}${p.zero != null ? ` · Zero ${eur(p.zero)}` : ""}`;
+    return ` · CardTrader ${eur(p.min)}${p.cond_min ? ` <span class="sd">${ctCond(p.cond_min)}</span>` : ""}${p.medio != null ? ` · media ${eur(p.medio)}` : ""}${p.zero != null ? ` · Zero ${eur(p.zero)}` : ""}`;
   };
   let righe = "";
   for (const n of negozi) {
@@ -489,6 +491,7 @@ function corpoCarrello(){
       <span class="t">Totale Cardmarket <small class="sd">trend delle stampe scelte</small></span><span class="mono">${eur(totTrend)}</span>
       <span class="t">Totale più basso <small class="sd">trend delle stampe più economiche</small></span><span class="mono">${eur(totBasso)}</span>
       ${ctAttivo ? `<span class="t">Totale CardTrader <small class="sd">offerte più basse delle stampe scelte${conCt.length < vs.length ? ` · ${conCt.length} su ${vs.length} carte` : ""}</small></span><span class="mono">${conCt.length ? eur(totCt) : ctStato === "errore" ? "—" : "…"}</span>
+      <span class="t">Totale CardTrader medio <small class="sd">media delle offerte${conMedio.length < vs.length ? ` · ${conMedio.length} su ${vs.length} carte` : ""}</small></span><span class="mono">${conMedio.length ? eur(totMedio) : "—"}</span>
       <span class="t">Totale CardTrader Zero <small class="sd">spedizione unica${conZero.length < vs.length ? ` · ${conZero.length} su ${vs.length} carte` : ""}</small></span><span class="mono">${conZero.length ? eur(totZero) : "—"}</span>` : ""}
       <span class="t">Differenza <small class="sd">reale − Cardmarket</small></span><span>${deltaHtml(totPagCmp, totRif) || "—"}</span>
       ${senzaPrezzo ? `<span class="t" style="grid-column:1 / -1">${senzaPrezzo} ${senzaPrezzo === 1 ? "carta senza prezzo reale, esclusa" : "carte senza prezzo reale, escluse"} dal totale reale e dalla differenza</span>` : ""}
@@ -755,6 +758,7 @@ function righeCt(s, etichetta){
   if (p === undefined) return `<div class="cm-r"><span>${etichetta}</span><b class="sd">${ctStato === "errore" ? "non risponde" : "…"}</b></div>`;
   if (!p || p.min == null) return `<div class="cm-r"><span>${etichetta}</span><b class="sd">${p && p.blueprint ? "nessuna offerta" : "non trovata"}</b></div>`;
   return `<div class="cm-r"><span>${etichetta} · più bassa${p.cond_min ? ` <small class="sd">${ctCond(p.cond_min)}</small>` : ""}</span><b>${eur(p.min)}</b></div>` +
+    (p.medio != null ? `<div class="cm-r"><span>${etichetta} · media <small class="sd">${p.offerte} offerte</small></span><b>${eur(p.medio)}</b></div>` : "") +
     (p.zero != null ? `<div class="cm-r"><span>${etichetta} · Zero${p.cond_zero ? ` <small class="sd">${ctCond(p.cond_zero)}</small>` : ""} <small class="sd">spedizione unica</small></span><b>${eur(p.zero)}</b></div>` : "");
 }
 
