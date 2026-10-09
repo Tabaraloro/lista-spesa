@@ -751,36 +751,31 @@ function chiediCt(stampe, poi){
 }
 const ctDi = s => s && s.id in ct ? ct[s.id] : undefined;      // undefined: non ancora chiesto
 const ctLink = p => p && p.blueprint ? `https://www.cardtrader.com/cards/${p.blueprint}` : null;
-// la riga "CardTrader" per una stampa: prezzo piu' basso e piu' basso fra i venditori Zero
-function righeCt(s, etichetta){
-  const p = ctDi(s);
-  if (ctStato === "nonpronto") return "";
-  if (p === undefined) return `<div class="cm-r"><span>${etichetta}</span><b class="sd">${ctStato === "errore" ? "non risponde" : "…"}</b></div>`;
-  if (!p || p.min == null) return `<div class="cm-r"><span>${etichetta}</span><b class="sd">${p && p.blueprint ? "nessuna offerta" : "non trovata"}</b></div>`;
-  return `<div class="cm-r"><span>${etichetta} · più bassa${p.cond_min ? ` <small class="sd">${ctCond(p.cond_min)}</small>` : ""}</span><b>${eur(p.min)}</b></div>` +
-    (p.medio != null ? `<div class="cm-r"><span>${etichetta} · media <small class="sd">${p.offerte} offerte</small></span><b>${eur(p.medio)}</b></div>` : "") +
-    (p.zero != null ? `<div class="cm-r"><span>${etichetta} · Zero${p.cond_zero ? ` <small class="sd">${ctCond(p.cond_zero)}</small>` : ""} <small class="sd">spedizione unica</small></span><b>${eur(p.zero)}</b></div>` : "");
-}
-
-// I prezzi di mercato nel foglio «Trovata»: Cardmarket (il "trend" che passa Scryfall, aggiornato ogni giorno)
-// per la stampa scelta e per la più economica, e le offerte vere di CardTrader per le stesse stampe.
+// I prezzi di mercato nel foglio «Trovata»: una scheda per la stampa aperta e una per la più economica (se diversa),
+// con i numeri in evidenza e l'etichetta sotto: Cardmarket (il "trend" che passa Scryfall) e CardTrader
+// (offerta più bassa, media delle offerte, più bassa fra i venditori Zero). In fondo i due link.
+const n2 = v => v == null ? "—" : v.toFixed(2).replace(".", ",");
 function prezziMercato(c, s){
   const conPrezzo = c.stampe.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur);
   const eco = conPrezzo[0] || null;
-  const link = (s && s.cm) || (eco && eco.cm) || `https://www.cardmarket.com/it/Magic/Products/Search?searchString=${encodeURIComponent(c.nome)}`;
-  const righe = [];
-  if (s) righe.push(`<div class="cm-r"><span>Questa stampa${s.eur == null && s.eur_foil != null ? " (foil)" : ""}</span><b>${s.eur != null ? eur(s.eur) : s.eur_foil != null ? eur(s.eur_foil) : "—"}</b></div>`);
-  if (eco && (!s || eco.id !== s.id)) righe.push(`<div class="cm-r"><span>La più economica · ${descStampa(eco)}</span><b>${eur(eco.eur)}</b></div>`);
-  if (!righe.length) righe.push(`<div class="cm-r"><span>Prezzo non ancora scaricato da Scryfall</span><b>—</b></div>`);
-  let ctHtml = "";
-  if (db && ctStato !== "nonpronto") {
-    const quali = [s, eco && (!s || eco.id !== s.id) ? eco : null].filter(Boolean);
-    ctHtml = quali.map(x => righeCt(x, x === s ? "Questa stampa" : "La più economica")).join("");
-    const pLink = quali.map(ctDi).find(p => p && p.blueprint);
-    ctHtml = `<div class="sub" style="margin-top:8px">CardTrader, offerte di oggi</div>${ctHtml}${pLink ? `<a class="link" href="${esc(ctLink(pLink))}" target="_blank" rel="noopener">Vedi su CardTrader ↗</a>` : ""}`;
-  }
-  return `<div class="cm"><div class="sub">Cardmarket, prezzo trend di oggi</div>${righe.join("")}
-    <a class="link" href="${esc(link)}" target="_blank" rel="noopener">Vedi le offerte su Cardmarket ↗</a>${ctHtml}</div>`;
+  const righe = [s, eco && (!s || eco.id !== s.id) ? eco : null].filter(Boolean);
+  const conCt = !!db && ctStato !== "nonpronto";
+  const stat = (v, et, cond, vuoto) => `<div class="mk-s${v == null ? " vuoto" : ""}"><b>${v == null ? (vuoto || "—") : `${n2(v)}${cond ? `<sup>${ctCond(cond)}</sup>` : ""}`}</b><small>${et}</small></div>`;
+  const statCt = x => {
+    const p = ctDi(x);
+    if (p === undefined) return `<div class="mk-s vuoto mk-largo"><b>${ctStato === "errore" ? "non risponde" : "…"}</b><small>CardTrader</small></div>`;
+    if (!p || p.min == null) return `<div class="mk-s vuoto mk-largo"><b>${p && p.blueprint ? "nessuna offerta" : "non trovata"}</b><small>CardTrader</small></div>`;
+    return stat(p.min, "CT più bassa", p.cond_min) + stat(p.medio, "CT media") + stat(p.zero, "CT Zero", p.cond_zero, "—");
+  };
+  const scheda = x => `<div class="mk-riga">
+      <div class="mk-t">${x === s ? "Questa stampa" : "La più economica"} <span>${String(x.set).toUpperCase()} #${esc(String(x.numero))}</span></div>
+      <div class="mk-stat">${x.eur != null ? stat(x.eur, "Cardmarket") : x.eur_foil != null ? stat(x.eur_foil, "Cardmarket foil") : stat(null, "Cardmarket")}${conCt ? `<div class="mk-sep"></div>${statCt(x)}` : ""}</div>
+    </div>`;
+  const corpo = righe.length ? righe.map(scheda).join("") : `<div class="mk-riga"><div class="mk-t">Prezzi <span>non ancora scaricati da Scryfall</span></div></div>`;
+  const linkCm = (s && s.cm) || (eco && eco.cm) || `https://www.cardmarket.com/it/Magic/Products/Search?searchString=${encodeURIComponent(c.nome)}`;
+  const pCt = righe.map(ctDi).find(p => p && p.blueprint);
+  return `<div class="mercato">${corpo}
+    <div class="mk-link"><span>in €, di oggi</span><a class="btn sec piccolo" href="${esc(linkCm)}" target="_blank" rel="noopener">Cardmarket ↗</a>${pCt ? `<a class="btn sec piccolo" href="${esc(ctLink(pCt))}" target="_blank" rel="noopener">CardTrader ↗</a>` : ""}</div></div>`;
 }
 function apriFoglio(chiave, idStampa){
   const c = perChiave[chiave];
@@ -820,7 +815,7 @@ function apriFoglio(chiave, idStampa){
   wrap.hidden = false;
   // le offerte CardTrader arrivano dopo: si ridisegna solo il riquadro dei prezzi
   { const eco = c.stampe.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur)[0] || null;
-    chiediCt([s, eco].filter(Boolean), () => { const q = wrap.querySelector(".cm"); if (q && !wrap.hidden) q.outerHTML = prezziMercato(c, s); }); }
+    chiediCt([s, eco].filter(Boolean), () => { const q = wrap.querySelector(".mercato"); if (q && !wrap.hidden) q.outerHTML = prezziMercato(c, s); }); }
   wrap.onclick = async (ev) => {
     const t = ev.target.closest("[data-chiudi],[data-segna],[data-togli],[data-modo],[data-toglic]");
     if (!t) return;
