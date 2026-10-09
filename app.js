@@ -8,6 +8,7 @@ let carte = [], perChiave = {}, mazziTutti = [], generato = null, datiPronti = f
 const piccola = s => s && s.immagine ? s.immagine.replace("/normal/", "/small/") : null;
 const grande = s => s && s.immagine ? s.immagine : null;
 const eur = v => v == null ? "—" : v.toFixed(2).replace(".", ",") + " €";
+const n2 = v => v == null ? "—" : v.toFixed(2).replace(".", ",");
 const COL = {Bianco:"--W",Blu:"--U",Nero:"--B",Rosso:"--R",Verde:"--G",Multicolore:"--M",Incolori:"--C",Terre:"--L"};
 // i tre scaffali: espansioni e set base, mazzi Commander precostruiti, tutto il resto (in genere più caro)
 const ORDINE_CAT = ["normale", "commander", "speciale"];
@@ -294,6 +295,23 @@ function sottoRiga(c, s, sez){
   p.push(brevi(c));
   return p.join(" · ");
 }
+// Il prezzo di una riga e, per la barretta, il prezzo più alto fra le righe mostrate (lo calcola render)
+const prezzoRiga = (c, s) => F.vista === "set" && s ? prezzoStampa(s) : prezzoMin(c);
+let prezzoTop = 0;
+// L'avviso «la stampa conta»: solo se fra le stampe c'è una differenza vera (almeno 3 volte e 2 € in più)
+function forbice(c){
+  const p = c.stampe.filter(x => x.eur != null).map(x => x.eur);
+  if (p.length < 2) return null;
+  const lo = Math.min(...p), hi = Math.max(...p);
+  return lo > 0 && hi / lo >= 3 && hi - lo >= 2 ? {n: p.length, lo, hi} : null;
+}
+function prezzoBarra(c, s, sez){
+  if (sez !== "wish" && sez !== "cerco") return "";
+  const v = prezzoRiga(c, s), f = forbice(c);
+  const barra = v != null && prezzoTop > 0 ? `<div class="r-bar" title="${esc(eur(v))}"><i style="width:${Math.max(1.5, 100 * v / prezzoTop).toFixed(1)}%"></i></div>` : "";
+  const chip = f ? `<span class="r-chip" title="${f.n} stampe: il prezzo cambia molto da una all'altra, scegli bene">stampe fino a ${n2(f.hi)} €</span>` : "";
+  return chip || barra ? `<div class="r-pz">${barra}${chip}</div>` : "";
+}
 // Elenco: una riga, una sola azione a destra, e cambia con la sezione
 function riga(c, s, sez){
   const fatta = sez === "wish" && completa(c);
@@ -305,7 +323,7 @@ function riga(c, s, sez){
   const id = s ? s.id : "";
   return `<div class="r ${fatta ? "fatta" : ""}" data-chiave="${c.chiave}" data-stampa="${id}">
     <button class="r-img" data-stampe="${c.chiave}" data-img="${id}" aria-label="Apri ${esc(c.nome)}">${miniatura(c, s, false)}</button>
-    <div class="r-tx" data-stampe="${c.chiave}" data-img="${id}"><div class="r-nm">${esc(c.nome)}</div><div class="r-sb">${sottoRiga(c, s, sez)}</div></div>
+    <div class="r-tx" data-stampe="${c.chiave}" data-img="${id}"><div class="r-nm">${esc(c.nome)}</div><div class="r-sb">${sottoRiga(c, s, sez)}</div>${prezzoBarra(c, s, sez)}</div>
     ${az}</div>`;
 }
 // Raccoglitore: una casella con l'immagine; le azioni stanno nella scheda che si apre toccandola
@@ -348,6 +366,7 @@ function render(){
       : qualcuna ? "<b>Niente da mostrare</b>Nessuna carta con questi filtri o con questa ricerca." : VUOTO[sezione]}</div>`;
   } else {
     const gs = sezione === "wish" || sezione === "cerco" ? gruppi(cs) : [{voci: cs.sort(perNome).map(c => ({c, s: stampaSezione(c)}))}];
+    prezzoTop = Math.max(0, ...gs.flatMap(g => g.voci || []).map(v => prezzoRiga(v.c, v.s) || 0));
     for (const g of gs) {
       if (g.intestazione) { html += g.intestazione; continue; }
       const corpo = aspetto === "elenco"
@@ -751,30 +770,69 @@ function chiediCt(stampe, poi){
 }
 const ctDi = s => s && s.id in ct ? ct[s.id] : undefined;      // undefined: non ancora chiesto
 const ctLink = p => p && p.blueprint ? `https://www.cardtrader.com/cards/${p.blueprint}` : null;
-// I prezzi di mercato nel foglio «Trovata»: una scheda per la stampa aperta e una per la più economica (se diversa),
-// con i numeri in evidenza e l'etichetta sotto: Cardmarket (il "trend" che passa Scryfall) e CardTrader
-// (offerta più bassa, media delle offerte, più bassa fra i venditori Zero). In fondo i due link.
-const n2 = v => v == null ? "—" : v.toFixed(2).replace(".", ",");
-function prezziMercato(c, s){
-  const conPrezzo = c.stampe.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur);
-  const eco = conPrezzo[0] || null;
-  const righe = [s, eco && (!s || eco.id !== s.id) ? eco : null].filter(Boolean);
+// Il riquadro prezzi del foglio «Trovata»: i riferimenti di mercato come punti su una linea
+// (CardTrader offerta più bassa, Cardmarket trend, CardTrader media) e il tuo prezzo, mentre lo scrivi,
+// come punto blu sopra; sotto, un giudizio in parole. Si parla della stampa scelta, o della più economica.
+const pct = v => Math.round(Math.abs(v) * 100) + "%";
+function giudizio(tuo, cm, p){
+  if (tuo == null) return `<div class="mk-g muto">Scrivi quanto la paghi: ti dico se è un buon prezzo.</div>`;
+  const min = p && p.min, media = p && p.medio;
+  const g = (cls, ic, t) => `<div class="mk-g ${cls}"><span aria-hidden="true">${ic}</span> ${t}</div>`;
+  if (min != null && tuo < min - 0.005) return g("bene", "✓", "Sotto l'offerta più bassa di CardTrader");
+  if (cm != null && cm > 0) {
+    const d = (tuo - cm) / cm;
+    if (d <= -0.05) return g("bene", "✓", `Buon prezzo · ${pct(d)} sotto il trend`);
+    if (d < 0.05) return g("pari", "=", "In linea con il trend");
+    if (media != null && tuo <= media + 0.005) return g("pari", "≈", `${pct(d)} sopra il trend, ma sotto la media CardTrader`);
+    return g("caro", "!", `Caro · ${pct(d)} sopra il trend`);
+  }
+  if (min != null) return tuo <= min * 1.05 ? g("bene", "✓", "In linea con l'offerta più bassa") : g("caro", "!", `${pct((tuo - min) / min)} sopra l'offerta più bassa`);
+  return "";
+}
+function prezziMercato(c, s, tuo){
+  const eco = c.stampe.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur)[0] || null;
+  const x = s || eco;
+  const linkCm = (x && x.cm) || `https://www.cardmarket.com/it/Magic/Products/Search?searchString=${encodeURIComponent(c.nome)}`;
+  if (!x) return `<div class="mercato"><div class="mk-g muto">Prezzi non ancora scaricati da Scryfall.</div></div>`;
   const conCt = !!db && ctStato !== "nonpronto";
-  const stat = (v, et, cond, vuoto) => `<div class="mk-s${v == null ? " mk-vuoto" : ""}"><b>${v == null ? (vuoto || "—") : `${n2(v)}${cond ? `<sup>${ctCond(cond)}</sup>` : ""}`}</b><small>${et}</small></div>`;
-  const statCt = x => {
-    const p = ctDi(x);
-    if (p === undefined) return `<div class="mk-s mk-vuoto mk-largo"><b>${ctStato === "errore" ? "non risponde" : "…"}</b><small>CardTrader</small></div>`;
-    if (!p || p.min == null) return `<div class="mk-s mk-vuoto mk-largo"><b>${p && p.blueprint ? "nessuna offerta" : "non trovata"}</b><small>CardTrader</small></div>`;
-    return stat(p.min, "CT min", p.cond_min) + stat(p.medio, "CT media") + stat(p.zero, "CT Zero", p.cond_zero, "—");
-  };
-  const scheda = x => `<div class="mk-riga">
-      <div class="mk-t">${x === s ? "Questa stampa" : "La più economica"} <span>${String(x.set).toUpperCase()} #${esc(String(x.numero))}</span></div>
-      <div class="mk-stat">${x.eur != null ? stat(x.eur, "CM trend") : x.eur_foil != null ? stat(x.eur_foil, "CM foil") : stat(null, "CM trend")}${conCt ? `<div class="mk-sep"></div>${statCt(x)}` : ""}</div>
-    </div>`;
-  const corpo = righe.length ? righe.map(scheda).join("") : `<div class="mk-riga"><div class="mk-t">Prezzi <span>non ancora scaricati da Scryfall</span></div></div>`;
-  const linkCm = (s && s.cm) || (eco && eco.cm) || `https://www.cardmarket.com/it/Magic/Products/Search?searchString=${encodeURIComponent(c.nome)}`;
-  const pCt = righe.map(ctDi).find(p => p && p.blueprint);
-  return `<div class="mercato">${corpo}
+  const p = conCt ? ctDi(x) : null;                       // undefined = in arrivo
+  const cm = x.eur != null ? x.eur : x.eur_foil;
+  const rif = [];
+  if (p && p.min != null) rif.push({v: p.min, et: "CT min", cond: p.cond_min});
+  if (cm != null) rif.push({v: cm, et: x.eur == null ? "CM foil" : "CM trend"});
+  if (p && p.medio != null && (p.min == null || Math.abs(p.medio - p.min) > 0.005)) rif.push({v: p.medio, et: "CT media"});
+  if (tuo != null && !(tuo > 0)) tuo = null;
+  // la scala: dai riferimenti (e dal tuo prezzo), con un po' di margine
+  const vs = rif.map(r => r.v).concat(tuo != null ? [tuo] : []);
+  let lo = Math.min(...vs), hi = Math.max(...vs);
+  if (hi - lo < 0.01) { lo = lo * 0.8; hi = hi * 1.2 + 0.1; }
+  const m = (hi - lo) * 0.12; lo = Math.max(0, lo - m); hi += m;
+  const pos = v => 4 + 92 * (v - lo) / (hi - lo);
+  // le etichette sotto i punti: distanziate se i valori sono vicini
+  const et = rif.map(r => ({...r, x: pos(r.v)})).sort((a,b) => a.x - b.x);
+  et.forEach(e => e.lx = e.x);
+  for (let k = 0; k < 4; k++) {
+    for (let i = 1; i < et.length; i++) if (et[i].lx - et[i-1].lx < 27) { const c2 = (et[i].lx + et[i-1].lx) / 2; et[i-1].lx = c2 - 13.5; et[i].lx = c2 + 13.5; }
+    et.forEach(e => e.lx = Math.min(87, Math.max(13, e.lx)));
+  }
+  const linea = rif.length ? `<div class="mk-linea" role="img" aria-label="${esc(rif.map(r => `${r.et} ${n2(r.v)} euro`).join(", ") + (tuo != null ? `; il tuo prezzo ${n2(tuo)} euro` : ""))}">
+      <div class="mk-asse"></div>
+      ${et.length > 1 ? `<div class="mk-rng" style="left:${et[0].x}%;width:${et[et.length-1].x - et[0].x}%"></div>` : ""}
+      ${et.map(e => `<div class="mk-p" style="left:${e.x}%"></div><div class="mk-l" style="left:${e.lx}%"><b>${n2(e.v)}${e.cond ? `<sup>${ctCond(e.cond)}</sup>` : ""}</b>${e.et}</div>`).join("")}
+      ${tuo != null ? `<div class="mk-tu" style="left:${pos(tuo)}%"></div><div class="mk-tul" style="left:${Math.min(90, Math.max(10, pos(tuo)))}%">tu ${n2(tuo)}</div>` : ""}
+    </div>` : "";
+  // le informazioni che non stanno sulla linea, in una riga sola
+  const info = [`${x === s ? "Questa stampa" : "Stampa più economica"} <span class="mono">${String(x.set).toUpperCase()} #${esc(String(x.numero))}</span>`];
+  if (conCt) {
+    if (p === undefined) info.push(ctStato === "errore" ? "CardTrader non risponde" : "CardTrader in arrivo…");
+    else if (!p || p.min == null) info.push(p && p.blueprint ? "su CardTrader nessuna offerta" : "non trovata su CardTrader");
+    else { if (p.zero != null) info.push(`Zero ${n2(p.zero)}${p.cond_zero ? ` <span class="sd">${ctCond(p.cond_zero)}</span>` : ""}`); info.push(`${p.offerte} offerte`); }
+  }
+  const altra = s && eco && eco.id !== s.id && cm != null && eco.eur < cm - 0.005
+    ? `<div class="mk-info">La più economica: <span class="mono">${String(eco.set).toUpperCase()} #${esc(String(eco.numero))}</span> a ${n2(eco.eur)} €</div>` : "";
+  const pCt = p && p.blueprint ? p : null;
+  return `<div class="mercato">${linea}${giudizio(tuo, cm, p)}
+    <div class="mk-info">${info.join(" · ")}</div>${altra}
     <div class="mk-link"><span>in €, di oggi</span><a class="btn sec piccolo" href="${esc(linkCm)}" target="_blank" rel="noopener">Cardmarket ↗</a>${pCt ? `<a class="btn sec piccolo" href="${esc(ctLink(pCt))}" target="_blank" rel="noopener">CardTrader ↗</a>` : ""}</div></div>`;
 }
 function apriFoglio(chiave, idStampa){
@@ -801,7 +859,7 @@ function apriFoglio(chiave, idStampa){
       ${prezziMercato(c, s)}
       <div class="campi">
         <input id="f-negozio" placeholder="Negozio (facoltativo)" value="${ultimoNegozio.replace(/"/g,"&quot;")}" autocomplete="off">
-        <input id="f-prezzo" placeholder="€ prezzo" type="number" min="0" step="0.05" inputmode="decimal" value="${s && s.eur != null ? s.eur : ""}">
+        <input id="f-prezzo" placeholder="€ quanto la paghi" type="number" min="0" step="0.05" inputmode="decimal" value="">
       </div>
       <div class="modo" role="group" aria-label="Cosa fai con la carta">
         <button data-modo="carrello" aria-pressed="${modo === "carrello"}">🛒 La metto nel carrello</button>
@@ -813,12 +871,16 @@ function apriFoglio(chiave, idStampa){
         `<div><span>${t.mazzo}${t.negozio ? ` · ${t.negozio}` : ""}${t.prezzo != null && t.prezzo !== "" ? ` · ${eur(Number(t.prezzo))}` : ""}${t.set ? ` · ${descStampa(t)}` : ""}</span><button class="btn sec" data-togli="${i}">Rimuovi</button></div>`).join("")}</div>` : ""}
     </div>`;
   wrap.hidden = false;
-  // le offerte CardTrader arrivano dopo: si ridisegna solo il riquadro dei prezzi
+  // il riquadro prezzi si ridisegna mentre scrivi il prezzo, e quando arrivano le offerte CardTrader
+  const tuoPrezzo = () => { const v = wrap.querySelector("#f-prezzo"); return v && v.value !== "" ? Number(v.value) : null; };
+  const ridisegna = () => { const q = wrap.querySelector(".mercato"); if (q && !wrap.hidden) q.outerHTML = prezziMercato(c, s, tuoPrezzo()); };
+  wrap.querySelector("#f-prezzo").addEventListener("input", ridisegna);
   { const eco = c.stampe.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur)[0] || null;
-    chiediCt([s, eco].filter(Boolean), () => { const q = wrap.querySelector(".mercato"); if (q && !wrap.hidden) q.outerHTML = prezziMercato(c, s); }); }
+    chiediCt([s || eco].filter(Boolean), ridisegna); }
+  let salvando = false;                 // un secondo tocco mentre si salva non segna la carta due volte
   wrap.onclick = async (ev) => {
     const t = ev.target.closest("[data-chiudi],[data-segna],[data-togli],[data-modo],[data-toglic]");
-    if (!t) return;
+    if (!t || salvando) return;
     if (t.hasAttribute("data-chiudi")) { wrap.hidden = true; return; }
     if (t.hasAttribute("data-modo")) {
       modo = t.dataset.modo; try { localStorage.setItem("lista-spesa-modo", modo); } catch(e){}
@@ -839,7 +901,10 @@ function apriFoglio(chiave, idStampa){
       wrap.hidden = true; render(); await salvaTrovate(chiave); toast("Rimossa"); return;
     }
     const quali = t.dataset.segna === "*" ? mancano.map(x => x.m) : [t.dataset.segna];
-    const voce = m => ({mazzo: m, negozio, prezzo: prezzo === "" ? null : Number(prezzo),
+    salvando = true;
+    const rifS = s || c.stampe.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur)[0];
+    const trendAllora = rifS ? (rifS.eur != null ? rifS.eur : rifS.eur_foil) : null;    // per confronti onesti più avanti
+    const voce = m => ({mazzo: m, negozio, prezzo: prezzo === "" ? null : Number(prezzo), trend_cm: trendAllora ?? null,
       set: s ? s.set : null, set_nome: s ? s.set_nome : null, numero: s ? s.numero : null, variante: s ? varDi(s) : null,
       lingua: s ? s.lingua : null, quando: new Date().toISOString().slice(0,10)});
     if (modo === "carrello") {
