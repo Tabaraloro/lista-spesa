@@ -76,6 +76,16 @@ In Supabase apri **Authentication → URL Configuration** e incolla l'indirizzo 
 - **Prezzi**: si aggiornano da soli una volta al giorno. **Menu → Dati → Aggiorna adesso da Scryfall** li riscarica subito.
 - **Copia di sicurezza**: **Menu → Dati → Scarica una copia** salva un file con tutti i tuoi dati.
 
+## CardTrader (facoltativo)
+
+Nella scheda «Trovata» e nel carrello, oltre al prezzo trend di Cardmarket (che arriva da Scryfall), l'app può mostrare le **offerte vere di CardTrader**: la più bassa e la più bassa fra i venditori «CardTrader Zero» (spedizione unica). Serve una chiave personale di CardTrader, che resta su Supabase e mai nel sito:
+
+1. Su **cardtrader.com** → Impostazioni → sezione **API**: copia la chiave.
+2. Su **supabase.com** → il progetto → **Edge Functions** → **Secrets** → *Add new secret*: nome `CARDTRADER_TOKEN`, valore la chiave, poi *Save*.
+3. La funzione `cardtrader` (cartella `supabase/functions/cardtrader`) è già pubblicata sul progetto; se un giorno rifai il progetto da zero, pubblicala con `supabase functions deploy cardtrader` e crea le tabelle `ct_prezzi` e `ct_espansioni` (la migrazione `cardtrader_cache`).
+
+Senza la chiave l'app funziona uguale, solo senza le righe CardTrader. I prezzi CardTrader restano in memoria per 12 ore.
+
 ## File
 
 | File | Cos'è |
@@ -86,6 +96,7 @@ In Supabase apri **Authentication → URL Configuration** e incolla l'indirizzo 
 | `store.js` | il salvataggio: online su Supabase, oppure solo nel browser se `config.js` è vuoto |
 | `config.js` | i due valori di Supabase |
 | `supabase.sql` | la tabella da creare su Supabase (punto 1.2) |
+| `supabase/functions/cardtrader/index.ts` | la funzione su Supabase che chiede le offerte a CardTrader con la tua chiave |
 | `lib/` | le due librerie usate: il client di Supabase e JSZip per leggere gli zip di Archidekt |
 | `manifest.webmanifest`, `icona*` | nome e icona per installarla sul telefono |
 
