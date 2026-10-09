@@ -89,13 +89,11 @@ let carrello = {};
 const LSK = "lista-spesa-carrello";
 try { carrello = JSON.parse(localStorage.getItem(LSK) || "{}"); } catch(e){ carrello = {}; }
 function scriviCarrelloLocale(){ try { localStorage.setItem(LSK, JSON.stringify(carrello)); } catch(e){} }
-let ridisegnaCarrello = null;      // se il foglio del carrello e' aperto, si ridisegna quando arrivano dati nuovi
 function collegaCarrello(){
   db.collection("carrello").onSnapshot(snap => {
     const nuovo = {};
     snap.docs.forEach(d => { const b = d.data(); if (b && Array.isArray(b.voci) && b.voci.length) nuovo[d.id] = b.voci; });
     carrello = nuovo; scriviCarrelloLocale(); render();
-    if (ridisegnaCarrello) ridisegnaCarrello();
   }, err => {});
 }
 async function salvaCarrello(chiave, voci = carrello[chiave] || []){
@@ -141,9 +139,10 @@ function passaFiltri(c){
 const filtriAttivi = () => [F.mazzo, F.categoria, F.maxprezzo !== "", F.soloit, !F.nascondi].filter(Boolean).length;
 
 // ---------- aspetto e sezioni ----------
-// La stessa lista si guarda in due modi, a scelta, e la scelta resta su ogni dispositivo:
-//  "elenco":       righe compatte, una sola azione per riga, le quattro sezioni nella barra in basso;
-//  "raccoglitore": griglia di immagini grandi, le sezioni come pulsanti in alto, il carrello in una barra.
+// Le carte si guardano in due modi, a scelta, e la scelta resta su ogni dispositivo:
+//  "elenco":       righe compatte, con una sola azione per riga;
+//  "raccoglitore": griglia di immagini grandi, con le azioni nella scheda della carta.
+// Tutto il resto (intestazione, barra delle sezioni in basso, carrello, menu) e' uguale.
 // Le sezioni seguono il giro di una carta: la vorrei (Wishlist) -> la cerco -> nel carrello -> trovata.
 const SEZIONI = {wish:"Wishlist", cerco:"La cerco", carr:"Carrello", trov:"Trovate"};
 const ASPETTI = {elenco:"Elenco", raccoglitore:"Raccoglitore"};
@@ -339,8 +338,8 @@ function render(){
   if (!datiPronti) { lista.innerHTML = `<div class="vuoto">${statoCarico}</div>`; return; }
   const cs = carteDi(sezione);
   let html = "";
-  if (sezione === "carr" && aspetto === "elenco" && nCarrello()) {
-    html = `<div class="carr-pagina">${corpoCarrello(false)}</div>
+  if (sezione === "carr" && nCarrello()) {
+    html = `<div class="carr-pagina">${corpoCarrello()}</div>
       <div class="piede"><div class="t">Totale<br><b class="mono">${eur(totCarrello())}</b></div><button class="btn" data-compra>Comprate tutte</button></div>`;
   } else if (!cs.length) {
     const qualcuna = sezione === "wish" ? carte.length : sezione === "cerco" ? carte.some(daCercare)
@@ -364,7 +363,7 @@ function render(){
 function testata(){
   const el = id => document.getElementById(id);
   const pronto = datiPronti && !!db;
-  el("titolo").textContent = aspetto === "elenco" && pronto ? SEZIONI[sezione] : "Lista della spesa";
+  el("titolo").textContent = pronto ? SEZIONI[sezione] : "Lista della spesa";
   const altro = aspetto === "elenco" ? "raccoglitore" : "elenco";
   el("aspetto").innerHTML = aspetto === "elenco" ? IC.griglia : IC.lista;
   el("aspetto").setAttribute("aria-label", `Passa all'aspetto ${ASPETTI[altro]}`);
@@ -376,23 +375,17 @@ function testata(){
   const cs = carte.filter(daCercare);
   const nVoci = nCarrello();
   const conta = {wish: carte.filter(c => !completa(c)).length, cerco: cs.length, carr: nVoci, trov: carte.filter(c => trovateDi(c.chiave)).length};
-  // le sezioni: pulsanti in alto nel Raccoglitore, barra in basso nell'Elenco
-  el("sezioni").hidden = aspetto !== "raccoglitore" || !pronto;
-  el("sezioni").innerHTML = Object.entries(SEZIONI).map(([k, n]) =>
-    `<button data-sezione="${k}" aria-pressed="${sezione === k}">${n} <b>${conta[k]}</b></button>`).join("");
-  el("nav").hidden = aspetto !== "elenco" || !pronto;
+  // le quattro sezioni stanno nella barra in basso, con qualunque aspetto
+  el("nav").hidden = !pronto;
   const icone = {wish: IC.lista, cerco: IC.seg, carr: IC.carr, trov: IC.ok};
   el("nav").innerHTML = Object.entries(SEZIONI).map(([k, n]) =>
     `<button data-sezione="${k}" ${sezione === k ? 'aria-current="page"' : ""}><span class="pill">${icone[k]}</span>${n}${(k === "cerco" || k === "carr") && conta[k] ? `<span class="num">${conta[k]}</span>` : ""}</button>`).join("");
   el("viste").hidden = !pronto || !(sezione === "wish" || sezione === "cerco");
   el("viste").innerHTML = [["set","Per set"],["colore","Per colore"],["mazzo","Per mazzo"]].map(([v, t]) =>
     `<button data-vista="${v}" aria-pressed="${F.vista === v}">${t}</button>`).join("");
-  const barra = el("barra-carrello");
-  barra.hidden = aspetto !== "raccoglitore" || !pronto || !nVoci;
-  barra.innerHTML = `${IC.carr}<span class="t">Carrello · ${nCarte(nVoci)}</span><b class="mono">${eur(totCarrello())}</b>`;
-  // l'avviso in basso si tiene sopra le barre: quella delle sezioni, quella del carrello, il totale del carrello
-  const piede = aspetto === "elenco" && sezione === "carr" && nVoci && pronto;
-  document.documentElement.style.setProperty("--basso", (piede ? 154 : !el("nav").hidden || !barra.hidden ? 84 : 20) + "px");
+  // l'avviso in basso si tiene sopra la barra delle sezioni e, nel carrello, sopra il totale
+  const piede = sezione === "carr" && nVoci && pronto;
+  document.documentElement.style.setProperty("--basso", (piede ? 154 : pronto ? 84 : 20) + "px");
   // riepilogo della sezione
   let r = "";
   if (pronto) {
@@ -406,8 +399,7 @@ function testata(){
       r = `<span><b>${cs.length}</b> ${cs.length === 1 ? "carta" : "carte"}${copie !== cs.length ? ` (${copie} copie)` : ""} · <b>${eur(tot)}</b></span>
         <button class="btn sec piccolo" id="esporta" ${cs.length ? "" : "disabled"}>Copia per i siti</button>`;
     } else if (sezione === "carr") {
-      r = `<span><b>${nVoci}</b> ${nVoci === 1 ? "copia" : "copie"} non ancora comprate · <b>${eur(totCarrello())}</b></span>
-        ${aspetto === "raccoglitore" && nVoci ? `<button class="btn sec piccolo" id="apri-carrello">Prezzi e conti</button>` : ""}`;
+      r = `<span><b>${nVoci}</b> ${nVoci === 1 ? "copia" : "copie"} non ancora comprate · <b>${eur(totCarrello())}</b></span>`;
     } else {
       const copie = carte.reduce((t,c) => t + trovateDi(c.chiave), 0);
       const speso = Object.values(trovate).flat().reduce((t,x) => t + (Number(x.prezzo) || 0), 0);
@@ -446,9 +438,8 @@ function deltaHtml(p, rif){
   if (Math.abs(d) < 0.005) return `<span class="delta">= riferimento</span>`;
   return `<span class="delta ${d > 0 ? "su" : "giu"}">${d > 0 ? "+" : "−"}${eur(Math.abs(d))}</span>`;
 }
-const TESTO_CARRELLO_VUOTO = "Il carrello è vuoto. Quando trovi una carta, tocca «Trovata», scrivi prezzo e negozio e scegli «Nel carrello»: la carta resta da parte finché non decidi di comprarla.";
-// le voci del carrello con prezzo modificabile, i conti e i pulsanti
-function corpoCarrello(nelFoglio){
+// la pagina del carrello: le voci con prezzo modificabile e i conti
+function corpoCarrello(){
   const vs = vociCarrello();
   const negozi = [...new Set(vs.map(x => x.v.negozio || ""))];
   const tot = vs.reduce((t,x) => t + (prezzoDi(x.v) || 0), 0);
@@ -480,38 +471,10 @@ function corpoCarrello(nelFoglio){
       ${senzaPrezzo ? `<span class="t" style="grid-column:1 / -1">${senzaPrezzo} ${senzaPrezzo === 1 ? "carta senza prezzo, esclusa" : "carte senza prezzo, escluse"} dai conti</span>` : ""}
     </div>
     <div class="scelte">
-      ${nelFoglio ? `<button class="btn" data-compra>Comprate tutte: segnale come trovate</button>` : ""}
       <button class="btn sec" data-svuota>Svuota il carrello</button>
-      ${nelFoglio ? `<button class="btn sec" data-chiudi>Chiudi</button>` : ""}
     </div>`;
 }
-function apriCarrello(){
-  const wrap = document.getElementById("foglio-wrap");
-  const disegna = () => {
-    const vs = vociCarrello();
-    wrap.innerHTML = `<div class="velo" data-chiudi></div>
-      <div class="foglio" role="dialog" aria-label="Carrello">
-        <div class="testa"><div><h2>Carrello</h2>
-          <div class="sub">${!vs.length ? TESTO_CARRELLO_VUOTO : `${vs.length} ${vs.length === 1 ? "carta trovata" : "carte trovate"}, non ancora comprate. Puoi correggere il prezzo o togliere quelle che non vuoi tenere.`}</div></div>
-          <button class="btn sec" data-chiudi aria-label="Chiudi">✕</button></div>
-        ${vs.length ? corpoCarrello(true) : ""}
-      </div>`;
-  };
-  const ridisegna = () => { if (wrap.hidden) { ridisegnaCarrello = null; return; }
-    const f = wrap.querySelector(".foglio"); const y = f ? f.scrollTop : 0; disegna(); const g = wrap.querySelector(".foglio"); if (g) g.scrollTop = y; };
-  disegna();
-  wrap.hidden = false;
-  ridisegnaCarrello = () => { if (!document.activeElement || !document.activeElement.matches("[data-prezzo]")) ridisegna(); };
-  wrap.onchange = ev => { const inp = ev.target.closest("[data-prezzo]"); if (inp) cambiaPrezzo(inp); };
-  wrap.onclick = ev => {
-    const t = ev.target.closest("[data-chiudi],[data-toglic],[data-compra],[data-svuota],[data-stampe]");
-    if (!t) return;
-    if (t.hasAttribute("data-chiudi")) { wrap.hidden = true; ridisegnaCarrello = null; return; }
-    if (t.hasAttribute("data-stampe")) { ridisegnaCarrello = null; apriStampe(t.dataset.stampe, t.dataset.img); return; }
-    azioneCarrello(t);
-  };
-}
-const aggiornaCarrello = () => { render(); if (ridisegnaCarrello) ridisegnaCarrello(); };
+const aggiornaCarrello = () => render();
 async function cambiaPrezzo(inp){
   const [ch, i] = inp.dataset.prezzo.split("|"); const v = (carrello[ch] || [])[Number(i)]; if (!v) return;
   v.prezzo = inp.value === "" ? null : Number(inp.value);
@@ -552,8 +515,6 @@ function compraTutte(){
   const prima = chiavi.map(ch => ({ch, trov: copiaVoci(trovate[ch]), carr: copiaVoci(carrello[ch]), cerc: cercate[ch] ? {...cercate[ch]} : null}));
   const piano = chiavi.map(ch => ({ch, lista: [...copiaVoci(trovate[ch]), ...copiaVoci(carrello[ch])]}));
   for (const p of piano) { trovate[p.ch] = p.lista; delete carrello[p.ch]; }
-  // il foglio del carrello, ormai vuoto, si chiude: resta l'avviso con «Annulla»
-  if (ridisegnaCarrello) { ridisegnaCarrello = null; document.getElementById("foglio-wrap").hidden = true; }
   aggiornaCarrello();
   inCoda(async () => { for (const p of piano) { await salvaTrovate(p.ch, p.lista); await salvaCarrello(p.ch, []); } });
   toast(`Segnate comprate ${vs.length} ${vs.length === 1 ? "carta" : "carte"}`, 7000, () => inCoda(async () => {
@@ -1162,7 +1123,7 @@ function apriMenu(){
         <section class="blocco">
           <h3>Aspetto</h3>
           <div class="ordina">${Object.entries(ASPETTI).map(([k, n]) => `<button data-aspetto="${k}" aria-pressed="${aspetto === k}">${n}</button>`).join("")}</div>
-          <div class="sub"><b>Elenco</b>: righe compatte, sezioni nella barra in basso. <b>Raccoglitore</b>: griglia di immagini grandi.</div>
+          <div class="sub">Cambia solo come si vedono le carte. <b>Elenco</b>: righe compatte, con il segnalibro e «Trovata» sulla riga. <b>Raccoglitore</b>: griglia di immagini grandi; le azioni sono nella scheda della carta.</div>
         </section>
 
         <section class="blocco">
@@ -1263,7 +1224,7 @@ lista.addEventListener("toggle", ev => {
   else { if (d.open) chiusi.delete(id); else chiusi.add(id); }
 }, true);
 // sezioni (in alto nel Raccoglitore, in basso nell'Elenco), viste, riepilogo, barra del carrello
-for (const id of ["sezioni", "nav"]) document.getElementById(id).addEventListener("click", e => {
+document.getElementById("nav").addEventListener("click", e => {
   const b = e.target.closest("[data-sezione]"); if (b) scegliSezione(b.dataset.sezione);
 });
 document.getElementById("viste").addEventListener("click", e => {
@@ -1272,9 +1233,7 @@ document.getElementById("viste").addEventListener("click", e => {
 });
 document.getElementById("riepilogo").addEventListener("click", e => {
   if (e.target.closest("#esporta")) apriEsporta();
-  if (e.target.closest("#apri-carrello")) apriCarrello();
 });
-document.getElementById("barra-carrello").addEventListener("click", apriCarrello);
 document.getElementById("aspetto").addEventListener("click", () => {
   const a = aspetto === "elenco" ? "raccoglitore" : "elenco";
   scegliAspetto(a); toast(`Aspetto: ${ASPETTI[a]}`);
