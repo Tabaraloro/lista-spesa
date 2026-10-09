@@ -760,16 +760,16 @@ function prezziMercato(c, s){
   const eco = conPrezzo[0] || null;
   const righe = [s, eco && (!s || eco.id !== s.id) ? eco : null].filter(Boolean);
   const conCt = !!db && ctStato !== "nonpronto";
-  const stat = (v, et, cond, vuoto) => `<div class="mk-s${v == null ? " vuoto" : ""}"><b>${v == null ? (vuoto || "—") : `${n2(v)}${cond ? `<sup>${ctCond(cond)}</sup>` : ""}`}</b><small>${et}</small></div>`;
+  const stat = (v, et, cond, vuoto) => `<div class="mk-s${v == null ? " mk-vuoto" : ""}"><b>${v == null ? (vuoto || "—") : `${n2(v)}${cond ? `<sup>${ctCond(cond)}</sup>` : ""}`}</b><small>${et}</small></div>`;
   const statCt = x => {
     const p = ctDi(x);
-    if (p === undefined) return `<div class="mk-s vuoto mk-largo"><b>${ctStato === "errore" ? "non risponde" : "…"}</b><small>CardTrader</small></div>`;
-    if (!p || p.min == null) return `<div class="mk-s vuoto mk-largo"><b>${p && p.blueprint ? "nessuna offerta" : "non trovata"}</b><small>CardTrader</small></div>`;
-    return stat(p.min, "CT più bassa", p.cond_min) + stat(p.medio, "CT media") + stat(p.zero, "CT Zero", p.cond_zero, "—");
+    if (p === undefined) return `<div class="mk-s mk-vuoto mk-largo"><b>${ctStato === "errore" ? "non risponde" : "…"}</b><small>CardTrader</small></div>`;
+    if (!p || p.min == null) return `<div class="mk-s mk-vuoto mk-largo"><b>${p && p.blueprint ? "nessuna offerta" : "non trovata"}</b><small>CardTrader</small></div>`;
+    return stat(p.min, "CT min", p.cond_min) + stat(p.medio, "CT media") + stat(p.zero, "CT Zero", p.cond_zero, "—");
   };
   const scheda = x => `<div class="mk-riga">
       <div class="mk-t">${x === s ? "Questa stampa" : "La più economica"} <span>${String(x.set).toUpperCase()} #${esc(String(x.numero))}</span></div>
-      <div class="mk-stat">${x.eur != null ? stat(x.eur, "Cardmarket") : x.eur_foil != null ? stat(x.eur_foil, "Cardmarket foil") : stat(null, "Cardmarket")}${conCt ? `<div class="mk-sep"></div>${statCt(x)}` : ""}</div>
+      <div class="mk-stat">${x.eur != null ? stat(x.eur, "CM trend") : x.eur_foil != null ? stat(x.eur_foil, "CM foil") : stat(null, "CM trend")}${conCt ? `<div class="mk-sep"></div>${statCt(x)}` : ""}</div>
     </div>`;
   const corpo = righe.length ? righe.map(scheda).join("") : `<div class="mk-riga"><div class="mk-t">Prezzi <span>non ancora scaricati da Scryfall</span></div></div>`;
   const linkCm = (s && s.cm) || (eco && eco.cm) || `https://www.cardmarket.com/it/Magic/Products/Search?searchString=${encodeURIComponent(c.nome)}`;
