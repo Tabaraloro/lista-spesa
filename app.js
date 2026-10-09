@@ -443,10 +443,14 @@ function corpoCarrello(){
   const vs = vociCarrello();
   const negozi = [...new Set(vs.map(x => x.v.negozio || ""))];
   const tot = vs.reduce((t,x) => t + (prezzoDi(x.v) || 0), 0);
+  // tre totali: quello reale (i prezzi scritti), il trend Cardmarket delle stampe scelte, il trend delle stampe più economiche
+  const totTrend = vs.reduce((t,x) => t + (riferimento(x.c, x.v).p || 0), 0);
+  const totBasso = vs.reduce((t,x) => t + (x.c.prezzo_min || 0), 0);
   const conRif = vs.filter(x => prezzoDi(x.v) != null && riferimento(x.c, x.v).p != null);
   const totRif = conRif.reduce((t,x) => t + riferimento(x.c, x.v).p, 0);
   const totPagCmp = conRif.reduce((t,x) => t + prezzoDi(x.v), 0);
   const senzaPrezzo = vs.filter(x => prezzoDi(x.v) == null).length;
+  const senzaTrend = vs.filter(x => riferimento(x.c, x.v).p == null).length;
   let righe = "";
   for (const n of negozi) {
     const qui = vs.filter(x => (x.v.negozio || "") === n);
@@ -459,16 +463,18 @@ function corpoCarrello(){
         <div class="vp"><input type="number" min="0" step="0.05" inputmode="decimal" value="${prezzoDi(x.v) ?? ""}" placeholder="€" data-prezzo="${x.ch}|${x.i}" aria-label="Prezzo di ${esc(x.c.nome)}">
           <button class="btn sec piccolo" data-toglic="${x.ch}|${x.i}" aria-label="Togli ${esc(x.c.nome)} dal carrello">Togli</button></div>
         <div class="vd">per ${esc(x.v.mazzo)}${negozi.length === 1 && x.v.negozio ? ` · ${esc(x.v.negozio)}` : ""}${x.v.set ? ` · ${descStampa(x.v)}` : ""}<br>
-          riferimento ${eur(r.p)} <span class="sd">(${r.cosa})</span> ${deltaHtml(prezzoDi(x.v), r.p)}</div>
+          Cardmarket ${eur(r.p)} <span class="sd">(${r.cosa})</span>${x.c.prezzo_min != null && r.p != null && x.c.prezzo_min < r.p - 0.005 ? ` · più bassa ${eur(x.c.prezzo_min)}` : ""} ${deltaHtml(prezzoDi(x.v), r.p)}</div>
       </div>`;
     }).join("");
   }
   return `${righe}
     <div class="totali">
-      <span class="t">Totale del carrello</span><b class="mono">${eur(tot)}</b>
-      <span class="t">Le stesse carte al prezzo di riferimento</span><span class="mono">${eur(totRif)}</span>
-      <span class="t">Differenza</span><span>${deltaHtml(totPagCmp, totRif) || "—"}</span>
-      ${senzaPrezzo ? `<span class="t" style="grid-column:1 / -1">${senzaPrezzo} ${senzaPrezzo === 1 ? "carta senza prezzo, esclusa" : "carte senza prezzo, escluse"} dai conti</span>` : ""}
+      <span class="t">Totale reale <small class="sd">i prezzi che hai scritto</small></span><b class="mono">${eur(tot)}</b>
+      <span class="t">Totale Cardmarket <small class="sd">trend delle stampe scelte</small></span><span class="mono">${eur(totTrend)}</span>
+      <span class="t">Totale più basso <small class="sd">trend delle stampe più economiche</small></span><span class="mono">${eur(totBasso)}</span>
+      <span class="t">Differenza <small class="sd">reale − Cardmarket</small></span><span>${deltaHtml(totPagCmp, totRif) || "—"}</span>
+      ${senzaPrezzo ? `<span class="t" style="grid-column:1 / -1">${senzaPrezzo} ${senzaPrezzo === 1 ? "carta senza prezzo reale, esclusa" : "carte senza prezzo reale, escluse"} dal totale reale e dalla differenza</span>` : ""}
+      ${senzaTrend ? `<span class="t" style="grid-column:1 / -1">${senzaTrend} ${senzaTrend === 1 ? "carta senza prezzo Cardmarket" : "carte senza prezzo Cardmarket"} (Scryfall non l'ha ancora dato)</span>` : ""}
     </div>
     <div class="scelte">
       <button class="btn sec" data-svuota>Svuota il carrello</button>
@@ -698,6 +704,19 @@ function apriStampe(chiave, idImg){
 
 // ---------- foglio "trovata" ----------
 const descStampa = s => `${s.set_nome || String(s.set||"").toUpperCase()} <span class="mono">${String(s.set||"").toUpperCase()} #${s.numero}</span>${s.variante ? ` · ${s.variante}` : ""}${s.lingua === "it" ? " · IT" : ""}`;
+// I prezzi Cardmarket che Scryfall ci passa (il "trend" di Cardmarket, aggiornato ogni giorno):
+// quello della stampa scelta e quello della stampa più economica fra tutte, con il link alla pagina Cardmarket.
+function prezziCardmarket(c, s){
+  const conPrezzo = c.stampe.filter(x => x.eur != null).sort((a,b) => a.eur - b.eur);
+  const eco = conPrezzo[0] || null;
+  const link = (s && s.cm) || (eco && eco.cm) || `https://www.cardmarket.com/it/Magic/Products/Search?searchString=${encodeURIComponent(c.nome)}`;
+  const righe = [];
+  if (s) righe.push(`<div class="cm-r"><span>Questa stampa${s.eur == null && s.eur_foil != null ? " (foil)" : ""}</span><b>${s.eur != null ? eur(s.eur) : s.eur_foil != null ? eur(s.eur_foil) : "—"}</b></div>`);
+  if (eco && (!s || eco.id !== s.id)) righe.push(`<div class="cm-r"><span>La più economica · ${descStampa(eco)}</span><b>${eur(eco.eur)}</b></div>`);
+  if (!righe.length) righe.push(`<div class="cm-r"><span>Prezzo non ancora scaricato da Scryfall</span><b>—</b></div>`);
+  return `<div class="cm"><div class="sub">Cardmarket, prezzo trend di oggi</div>${righe.join("")}
+    <a class="link" href="${esc(link)}" target="_blank" rel="noopener">Vedi le offerte su Cardmarket ↗</a></div>`;
+}
 function apriFoglio(chiave, idStampa){
   const c = perChiave[chiave];
   const s = c.stampe.find(x => x.id === idStampa) || null;
@@ -719,6 +738,7 @@ function apriFoglio(chiave, idStampa){
     <div class="foglio" role="dialog" aria-label="Segna come trovata">
       <h2>${c.nome}</h2>
       <div class="sub">${c.copie === 1 ? "Ne cerchi una" : `Ne cerchi ${c.copie}`} · ${c.mazzi.join(", ")}${s ? `<br>stampa: ${descStampa(s)}` : ""}</div>
+      ${prezziCardmarket(c, s)}
       <div class="campi">
         <input id="f-negozio" placeholder="Negozio (facoltativo)" value="${ultimoNegozio.replace(/"/g,"&quot;")}" autocomplete="off">
         <input id="f-prezzo" placeholder="€ prezzo" type="number" min="0" step="0.05" inputmode="decimal" value="${s && s.eur != null ? s.eur : ""}">
