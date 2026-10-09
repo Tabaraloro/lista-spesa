@@ -862,27 +862,45 @@ async function caricaCarte(voci){
 }
 
 // ---------- accesso: email e password, oppure link via email (solo con Supabase configurato) ----------
-function mostraAccesso(){
-  statoCarico = `<form class="accesso" id="acc-form" autocomplete="on">
-    <h2>Accedi</h2>
+// Due schermate separate: «Entra» (chi ha già l'account) e «Crea account».
+let modoAccesso = "entra";
+function mostraAccesso(modo, email){
+  if (modo) modoAccesso = modo;
+  const crea = modoAccesso === "crea";
+  const em = `<input id="acc-email" name="email" type="email" autocomplete="username" inputmode="email" placeholder="Email" value="${esc(email || "")}" required>`;
+  statoCarico = crea
+    ? `<form class="accesso" id="acc-form" autocomplete="on">
+    <h2>Crea un account</h2>
+    <p>Scegli l'email e una password: ti arriva una mail per confermare l'account, poi entri con quelle.</p>
+    ${em}
+    <input id="acc-pw" name="password" type="password" autocomplete="new-password" placeholder="Password (almeno 6 caratteri)" minlength="6" required>
+    <input id="acc-pw2" name="password2" type="password" autocomplete="new-password" placeholder="Ripeti la password" minlength="6" required>
+    <button class="btn" type="submit">Crea account</button>
+    <div class="sub" id="acc-msg" role="status"></div>
+    <p class="acc-cambio">Hai già un account? <button class="link" type="button" data-acc="vai-entra">Entra</button></p></form>`
+    : `<form class="accesso" id="acc-form" autocomplete="on">
+    <h2>Entra</h2>
     <p>Wishlist, carte cercate, carrello e trovate restano legati al tuo account e li vedi uguali dal telefono e dal PC.</p>
-    <input id="acc-email" name="email" type="email" autocomplete="username" inputmode="email" placeholder="Email" required>
+    ${em}
     <input id="acc-pw" name="password" type="password" autocomplete="current-password" placeholder="Password" minlength="6">
     <button class="btn" type="submit">Entra</button>
     <div class="acc-altro">
-      <button class="btn sec piccolo" type="button" data-acc="crea">Crea account</button>
       <button class="btn sec piccolo" type="button" data-acc="dimenticata">Password dimenticata?</button>
       <button class="btn sec piccolo" type="button" data-acc="link">Entra con un link via email</button>
     </div>
-    <div class="sub" id="acc-msg" role="status"></div></form>`;
+    <div class="sub" id="acc-msg" role="status"></div>
+    <p class="acc-cambio">Non hai ancora un account? <button class="link" type="button" data-acc="vai-crea">Crea account</button></p></form>`;
   render();
+  if (modo) { const i = document.getElementById(email ? "acc-pw" : "acc-email"); if (i) i.focus(); }
 }
 async function azioneAccesso(cosa){
   const email = document.getElementById("acc-email").value.trim();
+  if (cosa === "vai-crea" || cosa === "vai-entra") { mostraAccesso(cosa.slice(4), email); return; }
   const pw = document.getElementById("acc-pw").value;
   const msg = document.getElementById("acc-msg");
   if (!email) { msg.textContent = "Scrivi prima l'email."; return; }
   if ((cosa === "entra" || cosa === "crea") && pw.length < 6) { msg.textContent = "Scrivi la password: almeno 6 caratteri."; return; }
+  if (cosa === "crea" && pw !== document.getElementById("acc-pw2").value) { msg.textContent = "Le due password non sono uguali."; return; }
   msg.textContent = "Un momento…";
   try {
     if (cosa === "entra") { await Store.entra(email, pw); msg.textContent = "Dentro!"; location.reload(); return; }
@@ -890,7 +908,7 @@ async function azioneAccesso(cosa){
       const r = await Store.creaAccount(email, pw);
       if (r === "dentro") { location.reload(); return; }
       msg.textContent = r === "esiste"
-        ? "Esiste già un account con questa email. Se non hai mai scelto una password (entravi col link), premi «Password dimenticata?» per sceglierla."
+        ? "Esiste già un account con questa email: premi «Entra» qui sotto. Se non hai mai scelto una password (entravi col link), da lì premi «Password dimenticata?» per sceglierla."
         : `Ti ho mandato una mail a ${email}: apri il link per confermare l'account, poi torna qui ed entra con email e password.`;
       return;
     }
@@ -900,7 +918,7 @@ async function azioneAccesso(cosa){
 }
 document.getElementById("lista").addEventListener("submit", e => {
   if (e.target.id !== "acc-form") return;
-  e.preventDefault(); azioneAccesso("entra");
+  e.preventDefault(); azioneAccesso(modoAccesso);
 });
 document.getElementById("lista").addEventListener("click", e => {
   const b = e.target.closest("[data-acc]"); if (b) azioneAccesso(b.dataset.acc);
