@@ -242,12 +242,12 @@ button.link,a.link{border:0;background:none;color:var(--accent);font:inherit;fon
 .mercato{margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
 .mk-riga{background:var(--bg-2);border-radius:12px;padding:10px 12px}
 .mk-t{font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:6px}.mk-t span{font-weight:400;color:var(--ink-3);font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;margin-left:4px}
-.mk-stat{display:flex;align-items:flex-end;gap:6px}
-.mk-s{flex:1 1 0;min-width:0}.mk-s.mk-largo{flex:3 1 0}
-.mk-s b{display:block;font-size:17px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;line-height:1.15;white-space:nowrap}
+.mk-stat{display:flex;align-items:flex-end;gap:4px}
+.mk-s{flex:1 1 0;min-width:0;overflow:hidden}.mk-s.mk-largo{flex:3 1 0}
+.mk-s b{display:block;font-size:16px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;line-height:1.2;white-space:nowrap}
 .mk-s b sup{font-size:9px;font-weight:600;color:var(--ink-3);margin-left:2px;vertical-align:top;position:relative;top:2px}
-.mk-s small{display:block;font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em;margin-top:2px;white-space:nowrap}
-.mk-s.vuoto b{font-size:13px;font-weight:500;color:var(--ink-3);line-height:1.5}
+.mk-s small{display:block;font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.03em;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mk-s.mk-vuoto b{font-size:13px;font-weight:500;color:var(--ink-3);line-height:1.5;text-align:left}
 .mk-sep{width:1px;align-self:stretch;background:var(--line);margin:0 4px}
 .mk-link{display:flex;align-items:center;gap:8px;padding:0 2px}.mk-link span{margin-right:auto;font-size:11px;color:var(--ink-3)}
 .mk-link .btn{min-height:30px;padding:4px 12px;font-size:12px;text-decoration:none}
@@ -296,6 +296,6 @@ button.link,a.link{border:0;background:none;color:var(--accent);font:inherit;fon
 <script src="lib/jszip.min.js"></script>
 <script src="scryfall.js?v=6"></script>
 <script src="store.js?v=6"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
