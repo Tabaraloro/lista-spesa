@@ -155,6 +155,21 @@ async function cambiaPassword(password){
   recupero = false;
   if (/type=recovery/.test(location.hash)) history.replaceState(null, "", QUI());
 }
-window.Store = {collega, accedi, entra, creaAccount, passwordDimenticata, cambiaPassword, configurato, storeLocale,
+// ---------- prezzi CardTrader, attraverso la funzione "cardtrader" su Supabase ----------
+// stampe: [{id (Scryfall), set, set_nome, foil}]. Risponde {prezzi: {id: {min, cond_min, zero, cond_zero, offerte, blueprint, quando}}}
+// Se la funzione non e' pronta (manca la chiave CardTrader) l'errore ha .nonPronto = true.
+async function cardtrader(stampe){
+  if (!sb) throw new Error("Serve Supabase");
+  const {data, error} = await sb.functions.invoke("cardtrader", {body: {stampe}});
+  if (error) {
+    let dettaglio = "";
+    try { const r = error.context && await error.context.json(); dettaglio = r && r.errore || ""; } catch(e){}
+    const e = new Error(dettaglio || error.message || "CardTrader non risponde");
+    e.nonPronto = /CARDTRADER_TOKEN/.test(dettaglio);
+    throw e;
+  }
+  return data || {prezzi: {}};
+}
+window.Store = {collega, accedi, entra, creaAccount, passwordDimenticata, cambiaPassword, cardtrader, configurato, storeLocale,
   get recupero(){ return recupero; }};
 })();
