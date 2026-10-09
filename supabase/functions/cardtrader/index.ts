@@ -1,7 +1,7 @@
 // Funzione "cardtrader": fa da tramite fra l'app e l'API di CardTrader.
 // La chiave personale di CardTrader sta nel segreto CARDTRADER_TOKEN (Supabase → Edge Functions → Secrets),
 // mai nel sito. Chi chiama deve essere entrato nell'app (JWT di Supabase): riceve, per ogni id Scryfall,
-// l'offerta più bassa su CardTrader e la più bassa fra i venditori «CardTrader Zero».
+// l'offerta più bassa su CardTrader, la media delle offerte e la più bassa fra i venditori «CardTrader Zero».
 // I risultati restano in memoria (tabella ct_prezzi) per 12 ore, così CardTrader non viene chiamato a ogni apertura.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -34,7 +34,7 @@ async function ct(path: string) {
 
 type Stampa = { id: string; set: string; set_nome?: string; foil?: boolean };
 type Riga = { scryfall_id: string; blueprint_id: number | null; prezzo_min: number | null; cond_min: string | null;
-  prezzo_zero: number | null; cond_zero: string | null; offerte: number; aggiornato: string };
+  prezzo_medio: number | null; prezzo_zero: number | null; cond_zero: string | null; offerte: number; aggiornato: string };
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -75,7 +75,7 @@ Deno.serve(async (req: Request) => {
 
     for (const s of daFare) {
       const riga: Riga = { scryfall_id: s.id, blueprint_id: prezzi[s.id]?.blueprint_id ?? null, prezzo_min: null, cond_min: null,
-        prezzo_zero: null, cond_zero: null, offerte: 0, aggiornato: new Date().toISOString() };
+        prezzo_medio: null, prezzo_zero: null, cond_zero: null, offerte: 0, aggiornato: new Date().toISOString() };
       try {
         // 2) il "blueprint" (la stampa) di CardTrader che corrisponde a questa stampa Scryfall
         if (!riga.blueprint_id) {
@@ -95,6 +95,8 @@ Deno.serve(async (req: Request) => {
           const cond = (p: any) => (p.properties_hash && (p.properties_hash.condition || p.properties_hash.mtg_condition)) || null;
           const ord = offerte.slice().sort((a, b) => a.price.cents - b.price.cents);
           if (ord[0]) { riga.prezzo_min = ord[0].price.cents / 100; riga.cond_min = cond(ord[0]); }
+          // media semplice di tutte le offerte in euro (ogni offerta conta una volta, non per quantità)
+          if (ord.length) riga.prezzo_medio = Math.round(ord.reduce((t, p) => t + p.price.cents, 0) / ord.length) / 100;
           const zero = ord.find((p) => p.user && p.user.can_sell_via_hub);
           if (zero) { riga.prezzo_zero = zero.price.cents / 100; riga.cond_zero = cond(zero); }
         }
@@ -109,7 +111,7 @@ Deno.serve(async (req: Request) => {
   const risposta: Record<string, unknown> = {};
   for (const id of ids) {
     const r = prezzi[id]; if (!r) continue;
-    risposta[id] = { blueprint: r.blueprint_id, min: r.prezzo_min, cond_min: r.cond_min, zero: r.prezzo_zero, cond_zero: r.cond_zero, offerte: r.offerte, quando: r.aggiornato };
+    risposta[id] = { blueprint: r.blueprint_id, min: r.prezzo_min, cond_min: r.cond_min, medio: r.prezzo_medio ?? null, zero: r.prezzo_zero, cond_zero: r.cond_zero, offerte: r.offerte, quando: r.aggiornato };
   }
   return json({ prezzi: risposta, errori: errori.length ? errori : undefined });
 });
