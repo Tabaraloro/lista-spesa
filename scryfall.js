@@ -39,7 +39,8 @@ function stampa(c){
   const s = {set: c.set, set_nome: c.set_name, numero: c.collector_number, uscita: c.released_at, lingua: c.lang,
     rarita: c.rarity, immagine: immagine(c), eur: num(p.eur), eur_foil: num(p.eur_foil), finiture: c.finishes || [],
     promo: !!c.promo, digitale: !!c.digital, id: c.id, tipo_set: c.set_type, cornice: c.frame_effects || [],
-    bordo: c.border_color, arte_piena: !!c.full_art, promo_tipi: c.promo_types || [], cornice_anno: c.frame};
+    bordo: c.border_color, arte_piena: !!c.full_art, promo_tipi: c.promo_types || [], cornice_anno: c.frame,
+    cm: (c.purchase_uris && c.purchase_uris.cardmarket) || null};
   s.categoria = catSet(s.tipo_set, s.set);
   s.variante = variante(s);
   return s;
