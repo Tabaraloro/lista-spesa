@@ -100,9 +100,51 @@ function storeSupabase(sb, user){
   };
 }
 
+// ---------- sola lettura: la wishlist che un altro ti ha fatto vedere con un link ----------
+// L'indirizzo ha ?vedi=<codice>. I dati arrivano dalla funzione wishlist_condivisa del database,
+// che restituisce solo nomi delle carte, copie per mazzo e quali sono già prese (niente prezzi pagati,
+// negozi o carte cercate). Le collezioni che non servono restano vuote; scrivere non si può.
+const VEDI = (() => { try { const v = new URLSearchParams(location.search).get("vedi"); return v && /^[0-9a-f]{16,64}$/i.test(v) ? v : null; } catch(e){ return null; } })();
+function storeCondiviso(sb, token){
+  const dati = sb.rpc("wishlist_condivisa", {t: token}).then(({data, error}) => {
+    if (error) throw error;
+    if (!data) { const e = new Error("Questo link non è più attivo: chiedi a chi te l'ha mandato un link nuovo."); e.nonAttivo = true; throw e; }
+    return data;
+  });
+  const da = {wishlist: "wishlist", aggiunte: "aggiunte", escluse: "escluse"};
+  const store = {
+    modo: "condiviso", utente: null, nome: null,
+    pronto: dati.then(d => { store.nome = d.nome || null; return d; }),
+    collection(n){
+      return {
+        onSnapshot(cb, err){
+          dati.then(d => {
+            let x = {};
+            if (da[n]) x = d[da[n]] || {};
+            else if (n === "trovate") for (const [k, mazzi] of Object.entries(d.prese || {})) x[k] = {trovate: mazzi};
+            cb({docs: Object.keys(x).map(id => ({id, data: () => x[id]}))});
+          }, e => { if (err) err(e); });
+          return () => {};
+        },
+        doc(){
+          const no = async () => { throw new Error("È la wishlist di un altro: puoi solo guardarla"); };
+          return {set: no, delete: no};
+        },
+      };
+    },
+    ricarica(){},
+  };
+  return store;
+}
+
 let sb = null, recupero = false;
 const QUI = () => location.origin + location.pathname;
 async function collega(){
+  if (VEDI) {
+    if (!configurato) throw new Error("App non configurata");
+    sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {auth: {persistSession: false, autoRefreshToken: false, detectSessionInUrl: false}});
+    return storeCondiviso(sb, VEDI);
+  }
   if (!configurato) return storeLocale();
   // arrivando dal link "password dimenticata" si e' dentro, ma va scelta la password nuova
   recupero = /type=recovery/.test(location.hash);
@@ -170,6 +212,29 @@ async function cardtrader(stampe){
   }
   return data || {prezzi: {}};
 }
+// ---------- il link per far vedere la propria wishlist ----------
+// Tabella "condivisioni": una riga per utente (codice, nome da mostrare). «Nuovo link» cancella
+// la riga e ne crea un'altra, così il link vecchio smette di funzionare.
+const linkDi = token => QUI() + "?vedi=" + token;
+async function condivisione(){
+  const {data, error} = await sb.from("condivisioni").select("token,nome,creato").maybeSingle();
+  if (error) fallisce(error);
+  return data ? {...data, link: linkDi(data.token)} : null;
+}
+async function creaCondivisione(nome, token){            // token: solo per «Annulla» dopo averlo disattivato
+  const {error: e1} = await sb.from("condivisioni").delete().not("token", "is", null);
+  if (e1) fallisce(e1);
+  const riga = {nome: (nome || "").trim().slice(0, 40) || null};
+  if (token) riga.token = token;
+  const {data, error} = await sb.from("condivisioni").insert(riga).select("token,nome,creato").single();
+  if (error) fallisce(error);
+  return {...data, link: linkDi(data.token)};
+}
+async function togliCondivisione(){
+  const {error} = await sb.from("condivisioni").delete().not("token", "is", null);
+  if (error) fallisce(error);
+}
 window.Store = {collega, accedi, entra, creaAccount, passwordDimenticata, cambiaPassword, cardtrader, configurato, storeLocale,
+  condivisione, creaCondivisione, togliCondivisione, vedi: VEDI,
   get recupero(){ return recupero; }};
 })();
