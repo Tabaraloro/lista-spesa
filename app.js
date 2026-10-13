@@ -5,6 +5,9 @@
 // la pagina mostra a che punto e' il caricamento
 const GRUPPI = ["Bianco","Blu","Nero","Rosso","Verde","Multicolore","Incolori","Terre"];
 let carte = [], perChiave = {}, mazziTutti = [], generato = null, datiPronti = false, statoCarico = "Collegamento…";
+// Sola lettura: la wishlist di un altro, aperta con il suo link (?vedi=…). Si vedono solo le carte
+// che gli mancano; niente sezioni, menu, «+», azioni, e niente si scrive in questo browser.
+const SOLA = !!(window.Store && Store.vedi);
 const piccola = s => s && s.immagine ? s.immagine.replace("/normal/", "/small/") : null;
 const grande = s => s && s.immagine ? s.immagine : null;
 const eur = v => v == null ? "—" : v.toFixed(2).replace(".", ",") + " €";
@@ -24,8 +27,8 @@ let trovate = {};          // chiave -> [{mazzo, negozio, prezzo, set, set_nome,
 let db = null, dbPronto = false;
 const LS = "lista-spesa-trovate";
 function leggiLocale(){ try { return JSON.parse(localStorage.getItem(LS) || "{}"); } catch(e){ return {}; } }
-function scriviLocale(){ try { localStorage.setItem(LS, JSON.stringify(trovate)); } catch(e){} }
-trovate = leggiLocale();
+function scriviLocale(){ if (SOLA) return; try { localStorage.setItem(LS, JSON.stringify(trovate)); } catch(e){} }
+trovate = SOLA ? {} : leggiLocale();
 
 async function collegaDb(){
   try {
@@ -33,13 +36,13 @@ async function collegaDb(){
     if (!db) { mostraAccesso(); return; }
     if (Store.recupero) setTimeout(() => apriPassword(true), 300);
     collegaWishlist();
-    collegaCercate();
-    collegaCarrello();
+    if (SOLA) { cercate = {}; carrello = {}; ctStato = "nonpronto"; db.pronto.then(() => render(), () => {}); }
+    else { collegaCercate(); collegaCarrello(); }
     db.collection("trovate").onSnapshot(snap => {
       const nuovo = {};
       snap.docs.forEach(d => { const b = d.data(); if (b && Array.isArray(b.trovate) && b.trovate.length) nuovo[d.id] = b.trovate; });
       trovate = nuovo; dbPronto = true; scriviLocale(); render();
-    }, err => { db = null; toast("Non riesco a leggere le carte trovate salvate online: le modifiche restano su questo dispositivo", 6000); });
+    }, err => { if (SOLA) return; db = null; toast("Non riesco a leggere le carte trovate salvate online: le modifiche restano su questo dispositivo", 6000); });
   } catch(e){ db = null; }
 }
 // lista e voci si passano esplicite quando si salvano piu' carte di fila: fra una scrittura e
@@ -118,7 +121,8 @@ const mancanti = c => Math.max(0, c.copie - trovateDi(c.chiave) - nelCarrello(c.
 const F = {vista:"set", cerca:"", mazzo:"", maxprezzo:"", soloit:false, nascondi:true, categoria:"", estesi:true};
 try { Object.assign(F, JSON.parse(localStorage.getItem("lista-spesa-filtri") || "{}")); } catch(e){}
 F.cerca = "";
-function salvaFiltri(){ try { localStorage.setItem("lista-spesa-filtri", JSON.stringify({...F, cerca: ""})); } catch(e){} }
+if (SOLA) F.nascondi = true;
+function salvaFiltri(){ if (SOLA) return; try { localStorage.setItem("lista-spesa-filtri", JSON.stringify({...F, cerca: ""})); } catch(e){} }
 // le stampe di una carta che i filtri lasciano vedere (lingua e scaffale)
 function stampeDi(c){
   return c.stampe.filter(s => (F.soloit ? s.lingua === "it" : s.lingua === "en") && (!F.categoria || catDi(s) === F.categoria));
@@ -152,13 +156,14 @@ try {
   if (ASPETTI[localStorage.getItem("lista-spesa-aspetto")]) aspetto = localStorage.getItem("lista-spesa-aspetto");
   if (SEZIONI[localStorage.getItem("lista-spesa-sezione")]) sezione = localStorage.getItem("lista-spesa-sezione");
 } catch(e){}
+if (SOLA) sezione = "wish";
 function scegliAspetto(a){
   if (!ASPETTI[a]) return;
   aspetto = a; try { localStorage.setItem("lista-spesa-aspetto", a); } catch(e){}
   render();
 }
 function scegliSezione(s){
-  if (!SEZIONI[s]) return;
+  if (!SEZIONI[s] || SOLA) return;
   sezione = s; try { localStorage.setItem("lista-spesa-sezione", s); } catch(e){}
   window.scrollTo(0, 0); render();
 }
@@ -316,7 +321,8 @@ function prezzoBarra(c, s, sez){
 function riga(c, s, sez){
   const fatta = sez === "wish" && completa(c);
   let az = "";
-  if (sez === "wish") az = fatta ? `<span class="spunta" title="Trovata">${IC.ok}</span>`
+  if (SOLA) az = "";
+  else if (sez === "wish") az = fatta ? `<span class="spunta" title="Trovata">${IC.ok}</span>`
     : `<button class="segna" data-cerco="${c.chiave}" aria-pressed="${cercata(c)}" aria-label="${cercata(c) ? `La cerchi: tocca per smettere (${esc(c.nome)})` : `La cerco (${esc(c.nome)})`}">${IC.seg}</button>`;
   else if (sez === "cerco") az = `<button class="btn" data-trova="${c.chiave}">Trovata</button>`;
   else if (sez === "trov") az = `<button class="btn sec piccolo" data-trova="${c.chiave}">Modifica</button>`;
@@ -375,27 +381,28 @@ function render(){
       html += g.id ? gruppoHtml(g, corpo) : corpo;
     }
   }
-  html += `<div class="nota">Prezzi e stampe da Scryfall${generato ? ` del ${generato}` : ""}${db && db.modo === "online" ? ` · dati sincronizzati (${esc(db.utente || "")})` : " · dati salvati in questo browser"}</div>`;
+  html += `<div class="nota">Prezzi e stampe da Scryfall${generato ? ` del ${generato}` : ""}${SOLA ? " · solo da guardare: la lista la aggiorna chi te l'ha mandata" : db && db.modo === "online" ? ` · dati sincronizzati (${esc(db.utente || "")})` : " · dati salvati in questo browser"}</div>`;
   lista.innerHTML = html;
 }
 // intestazione, riepilogo, sezioni e barre: tutto quello che sta intorno alla lista
 function testata(){
   const el = id => document.getElementById(id);
   const pronto = datiPronti && !!db;
-  el("titolo").textContent = pronto ? SEZIONI[sezione] : "Lista della spesa";
+  el("titolo").textContent = SOLA ? (db && db.nome ? `Wishlist di ${db.nome}` : "Wishlist condivisa") : pronto ? SEZIONI[sezione] : "Lista della spesa";
+  el("apri-menu").hidden = SOLA;
   const altro = aspetto === "elenco" ? "raccoglitore" : "elenco";
   el("aspetto").innerHTML = aspetto === "elenco" ? IC.griglia : IC.lista;
   el("aspetto").setAttribute("aria-label", `Passa all'aspetto ${ASPETTI[altro]}`);
   el("aspetto").title = `Passa all'aspetto ${ASPETTI[altro]}`;
   const nf = filtriAttivi();
   el("apri-filtri").innerHTML = `Filtri${nf ? ` · ${nf}` : ""}`;
-  el("aggiungi").hidden = !pronto;
+  el("aggiungi").hidden = !pronto || SOLA;
   // conti
   const cs = carte.filter(daCercare);
   const nVoci = nCarrello();
   const conta = {wish: carte.filter(c => !completa(c)).length, cerco: cs.length, carr: nVoci, trov: carte.filter(c => trovateDi(c.chiave)).length};
   // le quattro sezioni stanno nella barra in basso, con qualunque aspetto
-  el("nav").hidden = !pronto;
+  el("nav").hidden = !pronto || SOLA;
   const icone = {wish: IC.lista, cerco: IC.seg, carr: IC.carr, trov: IC.ok};
   el("nav").innerHTML = Object.entries(SEZIONI).map(([k, n]) =>
     `<button data-sezione="${k}" ${sezione === k ? 'aria-current="page"' : ""}><span class="pill">${icone[k]}</span>${n}${(k === "cerco" || k === "carr") && conta[k] ? `<span class="num">${conta[k]}</span>` : ""}</button>`).join("");
@@ -404,14 +411,15 @@ function testata(){
     `<button data-vista="${v}" aria-pressed="${F.vista === v}">${t}</button>`).join("");
   // l'avviso in basso si tiene sopra la barra delle sezioni e, nel carrello, sopra il totale
   const piede = sezione === "carr" && nVoci && pronto;
-  document.documentElement.style.setProperty("--basso", (piede ? 154 : pronto ? 84 : 20) + "px");
+  document.documentElement.style.setProperty("--basso", (piede ? 154 : pronto && !SOLA ? 84 : 20) + "px");
   // riepilogo della sezione
   let r = "";
   if (pronto) {
     if (sezione === "wish") {
       const copie = carte.reduce((t,c) => t + Math.max(0, c.copie - trovateDi(c.chiave)), 0);
       const stima = carte.reduce((t,c) => t + (c.prezzo_min || 0) * Math.max(0, c.copie - trovateDi(c.chiave)), 0);
-      r = `<span><b>${copie}</b> ${copie === 1 ? "copia" : "copie"} da trovare · <b>${eur(stima)}</b> alla stampa più economica</span>`;
+      r = SOLA ? `<span><b>${copie}</b> ${copie === 1 ? "carta che manca" : "carte che mancano"} · circa <b>${eur(stima)}</b> alla stampa più economica</span>`
+        : `<span><b>${copie}</b> ${copie === 1 ? "copia" : "copie"} da trovare · <b>${eur(stima)}</b> alla stampa più economica</span>`;
     } else if (sezione === "cerco") {
       const copie = cs.reduce((t,c) => t + mancanti(c), 0);
       const tot = cs.reduce((t,c) => t + (c.prezzo_min || 0) * mancanti(c), 0);
@@ -694,6 +702,8 @@ function apriStampe(chiave, idImg){
   const azioni = () => {
     const fatta = completa(c), s = tutte.find(x => x.id === idGrande);
     const stato = copieTesto(c);
+    if (SOLA) return `${s ? `<div class="scelta-c">Stampa: ${descStampa(s)} · <b>${s.eur != null ? eur(s.eur) : s.eur_foil != null ? "foil " + eur(s.eur_foil) : "—"}</b></div>` : ""}
+      <div class="stato-c">${stato ? stato + " · " : ""}per ${esc(c.mazzi.join(", "))}</div>`;
     return `${s ? `<div class="scelta-c">Stampa scelta: ${descStampa(s)} · <b>${s.eur != null ? eur(s.eur) : s.eur_foil != null ? "foil " + eur(s.eur_foil) : "—"}</b></div>` : ""}
       <div class="azioni-c">
         ${fatta ? "" : `<button class="btn ${cercata(c) ? "cerco-on" : "sec"}" data-cerco-f aria-pressed="${cercata(c)}">${cercata(c) ? "✓ La cerco" : "La cerco"}</button>`}
@@ -708,7 +718,7 @@ function apriStampe(chiave, idImg){
           <button class="btn sec" data-chiudi aria-label="Chiudi">✕</button></div>
         ${azioni()}
         ${schedaCarta(c, idGrande)}
-        <div class="sub">Tocca una stampa per vederla grande: «Trovata» userà quella.</div>
+        <div class="sub">${SOLA ? "Tocca una stampa per vederla grande." : "Tocca una stampa per vederla grande: «Trovata» userà quella."}</div>
         <div class="ordina"><button data-ordina="set" aria-pressed="${ordineStampe === "set"}">Per scaffale e set</button><button data-ordina="prezzo" aria-pressed="${ordineStampe === "prezzo"}">Per prezzo</button></div>
         ${corpo()}
       </div>`;
@@ -938,6 +948,7 @@ let wl = null, aggiunte = null, escluse = {};   // null: non ancora arrivate
 let ridisegnaMenu = null;                 // se il menu e' aperto, si ridisegna quando cambiano i dati
 function collegaWishlist(){
   const errore = e => {
+    if (SOLA) { statoCarico = `<div><b>${esc(e && e.nonAttivo ? e.message : "Non riesco ad aprire questa wishlist")}</b>${e && e.nonAttivo ? "" : `<br>${esc(e && e.message || e)}<br><br><button class="btn" type="button" onclick="location.reload()">Riprova</button>`}</div>`; if (!datiPronti) render(); return; }
     statoCarico = `<div><b>Non riesco a leggere i dati salvati online</b><br>${esc(e && e.message || e)}<br><br>Controlla la connessione. Se non usi l'app da più di una settimana, il progetto Supabase può essere in pausa: riattivalo dal sito di Supabase («Resume project»), poi ricarica.<br><br><button class="btn" type="button" onclick="location.reload()">Ricarica</button></div>`;
     if (!datiPronti) render();
   };
@@ -1259,8 +1270,33 @@ async function togliCarta(chiave){
 }
 
 // ---------- menu ----------
+// condivisione: undefined = sto caricando, null = nessun link, {token, nome, link} = link attivo
+let cond, condErr = "", condDisattiva = false;
+function bloccoCondividi(){
+  const spiega = `<div class="sub">Un link segreto: chi lo apre vede solo le carte che ti mancano (non i prezzi che hai pagato né i negozi) e non può cambiare nulla. Non serve un account.</div>`;
+  if (cond === undefined) return spiega + `<div class="sub">${condErr ? esc(condErr) + ` <button class="link" type="button" data-cond-riprova>Riprova</button>` : "Controllo se hai già un link…"}</div>`;
+  if (!cond) return spiega + `<div class="cond-nuovo"><input type="text" data-cond-nome maxlength="40" placeholder="Il tuo nome (lo vede chi apre il link)" value="${esc(db && db.utente ? String(db.utente).split("@")[0] : "")}" aria-label="Nome da mostrare"><button class="btn" type="button" data-cond-crea>Crea il link</button></div>`;
+  if (condDisattiva) return `<div class="sub"><b>Disattivo il link?</b> Chi ce l'ha non vedrà più la tua wishlist.</div>
+    <div class="due"><button class="btn sec" type="button" data-cond-annulla>Annulla</button><button class="btn" type="button" data-cond-togli>Disattiva</button></div>`;
+  return spiega + `<input type="text" class="cond-link" readonly value="${esc(cond.link)}" aria-label="Link della wishlist" data-cond-link>
+    <div class="${navigator.share ? "due" : ""}" style="margin-top:8px"><button class="btn" type="button" data-cond-manda${navigator.share ? "" : ` style="width:100%"`}>${navigator.share ? "Condividi" : "Copia il link"}</button>${navigator.share ? `<button class="btn sec" type="button" data-cond-copia>Copia</button>` : ""}</div>
+    <div class="sub" style="margin-top:8px">Si vede come «Wishlist di ${esc(cond.nome || "…")}».</div>
+    <div class="due"><button class="btn sec" type="button" data-cond-nuovo>Nuovo link</button><button class="btn sec" type="button" data-cond-chiedi>Disattiva</button></div>
+    <div class="sub" style="margin-top:4px">«Nuovo link» spegne quello vecchio: usalo se l'hai mandato a qualcuno di troppo.</div>`;
+}
+async function caricaCondivisione(dopo){
+  condErr = "";
+  try { cond = await Store.condivisione(); }
+  catch(err){ cond = undefined; condErr = "Non riesco a controllare il link: " + (err && err.message || err); }
+  if (dopo) dopo();
+}
+async function copiaTesto(t){
+  try { await navigator.clipboard.writeText(t); return true; } catch(e){}
+  try { const i = document.createElement("textarea"); i.value = t; i.style.position = "fixed"; i.style.opacity = "0"; document.body.appendChild(i); i.select(); const ok = document.execCommand("copy"); i.remove(); return ok; } catch(e){ return false; }
+}
 function apriMenu(){
   const wrap = document.getElementById("foglio-wrap");
+  condDisattiva = false;
   const disegna = () => {
     const online = db && db.modo === "online";
     const mazziWl = Object.entries(wl || {}).sort((a,b) => a[0].localeCompare(b[0]));
@@ -1275,6 +1311,11 @@ function apriMenu(){
           <div class="sub">${!db ? "Non sei collegato." : online ? `Collegato come <b>${esc(db.utente)}</b>: telefono e PC vedono gli stessi dati.` : Store.configurato ? "Collegato." : "Dati salvati solo in questo browser (Supabase non configurato: vedi la guida)."}</div>
           ${online ? `<div class="due"><button class="btn sec" data-password>Cambia password</button><button class="btn sec" data-esci>Esci</button></div>` : ""}
         </section>
+
+        ${online ? `<section class="blocco">
+          <h3>Fai vedere la wishlist</h3>
+          ${bloccoCondividi()}
+        </section>` : ""}
 
         <section class="blocco">
           <h3>Wishlist</h3>
@@ -1319,11 +1360,14 @@ function apriMenu(){
     if (wrap.hidden || !wrap.querySelector(".foglio.menu")) { ridisegnaMenu = null; return; }
     const f = wrap.querySelector(".foglio"); const y = f ? f.scrollTop : 0;
     const aperte = [...wrap.querySelectorAll("details[open]")].map((d, i) => d.querySelector("summary").textContent);
+    const nome = wrap.querySelector("[data-cond-nome]"), scritto = nome ? nome.value : null;
     disegna();
+    const nome2 = wrap.querySelector("[data-cond-nome]"); if (nome2 && scritto !== null) nome2.value = scritto;
     const g = wrap.querySelector(".foglio"); if (g) g.scrollTop = y;
     wrap.querySelectorAll("details").forEach(d => { if (aperte.includes(d.querySelector("summary").textContent)) d.open = true; });
   };
   ridisegnaMenu = ridisegna;
+  if (db && db.modo === "online" && Store.condivisione) { cond = undefined; caricaCondivisione(ridisegna); }
   wrap.oninput = null; wrap.onsubmit = null;
   wrap.onchange = async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
@@ -1336,6 +1380,8 @@ function apriMenu(){
   };
   wrap.onclick = async e => {
     // "button[data-aspetto]": anche <body> ha data-aspetto, e closest() salirebbe fino a li'
+    const c = e.target.closest("[data-cond-crea],[data-cond-nuovo],[data-cond-togli],[data-cond-chiedi],[data-cond-annulla],[data-cond-manda],[data-cond-copia],[data-cond-riprova],[data-cond-link]");
+    if (c && wrap.contains(c)) { await azioneCondividi(c, ridisegna); return; }
     const t = e.target.closest("[data-chiudi],[data-esci],[data-password],[data-toglimazzo],[data-rimetti],[data-aggiorna],[data-esporta],button[data-aspetto]");
     if (!t || !wrap.contains(t)) return;
     if (t.hasAttribute("data-chiudi")) { wrap.hidden = true; ridisegnaMenu = null; return; }
@@ -1354,6 +1400,46 @@ function apriMenu(){
     } catch(err){ toast("Non è andata: " + (err && err.message || err), 5000); }
     setTimeout(ridisegna, 300);
   };
+}
+async function azioneCondividi(c, ridisegna){
+  const ha = a => c.hasAttribute(a);
+  if (ha("data-cond-link")) { c.select(); return; }
+  if (ha("data-cond-riprova")) { condErr = ""; ridisegna(); return caricaCondivisione(ridisegna); }
+  if (ha("data-cond-chiedi")) { condDisattiva = true; return ridisegna(); }
+  if (ha("data-cond-annulla")) { condDisattiva = false; return ridisegna(); }
+  if (ha("data-cond-copia") || (ha("data-cond-manda") && !navigator.share)) {
+    toast(await copiaTesto(cond.link) ? "Link copiato" : "Non riesco a copiarlo: tieni premuto sul link", 3000); return;
+  }
+  if (ha("data-cond-manda")) {
+    try { await navigator.share({title: "La mia wishlist", text: `Le carte Magic che mi mancano${cond.nome ? " (" + cond.nome + ")" : ""}`, url: cond.link}); } catch(e){}
+    return;
+  }
+  c.disabled = true;
+  try {
+    if (ha("data-cond-crea")) {
+      const i = document.querySelector("[data-cond-nome]");
+      cond = await Store.creaCondivisione(i ? i.value : "");
+      toast("Link creato", 2500);
+    }
+    if (ha("data-cond-nuovo")) {
+      const prima = cond;
+      cond = await Store.creaCondivisione(prima && prima.nome || "");
+      toast("Link nuovo: quello vecchio non funziona più", 6000, prima ? async () => {
+        try { cond = await Store.creaCondivisione(prima.nome || "", prima.token); toast("Torna il link di prima", 2500); }
+        catch(err){ toast("Non è andata: " + (err && err.message || err), 4000); }
+        if (ridisegnaMenu) ridisegnaMenu();
+      } : null);
+    }
+    if (ha("data-cond-togli")) {
+      const prima = cond; await Store.togliCondivisione(); cond = null; condDisattiva = false;
+      toast("Link disattivato", 6000, async () => {
+        try { cond = await Store.creaCondivisione(prima.nome || "", prima.token); toast("Link riattivato", 2500); }
+        catch(err){ toast("Non è andata: " + (err && err.message || err), 4000); }
+        if (ridisegnaMenu) ridisegnaMenu();
+      });
+    }
+  } catch(err){ toast("Non è andata: " + (err && err.message || err), 5000); }
+  ridisegna();
 }
 document.getElementById("apri-menu").addEventListener("click", apriMenu);
 document.getElementById("aggiungi").addEventListener("click", apriAggiungi);
@@ -1421,6 +1507,7 @@ if (!["set","colore","mazzo"].includes(F.vista)) F.vista = "set";
 document.getElementById("cerca").value = F.cerca; sel.value = F.mazzo; document.getElementById("maxprezzo").value = F.maxprezzo;
 selCat.value = ORDINE_CAT.includes(F.categoria) ? F.categoria : "";
 document.getElementById("soloit").checked = F.soloit; document.getElementById("nascondi").checked = F.nascondi;
+if (SOLA) document.getElementById("nascondi").closest("label").hidden = true;
 document.getElementById("estesi").checked = F.estesi !== false;
 document.getElementById("cerca").addEventListener("input", e => { F.cerca = e.target.value; salvaFiltri(); render(); });
 sel.addEventListener("change", e => { F.mazzo = e.target.value; salvaFiltri(); render(); });
