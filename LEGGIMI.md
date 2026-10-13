@@ -86,6 +86,12 @@ Nella scheda «Trovata» e nel carrello, oltre al prezzo trend di Cardmarket (ch
 
 Senza la chiave l'app funziona uguale, solo senza le righe CardTrader. I prezzi CardTrader restano in memoria per 12 ore.
 
+## Far vedere la wishlist
+
+Menu → **Fai vedere la wishlist** → «Crea il link». Chi apre il link vede solo le carte che ti mancano, con stampe e prezzi di Scryfall; non vede i prezzi che hai pagato né i negozi, e non può cambiare nulla. Non serve un account.
+
+«Nuovo link» spegne quello vecchio e ne fa un altro; «Disattiva» lo spegne e basta. Sul database è la tabella `condivisioni` più la funzione `wishlist_condivisa`, che dà fuori solo quei dati e solo a chi ha il link.
+
 ## File
 
 | File | Cos'è |
